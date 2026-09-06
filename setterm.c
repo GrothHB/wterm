@@ -2,11 +2,17 @@
 #include <unistd.h>
 #include <termios.h>
 #include <string.h>
+#include <time.h>
+
+#define ESC \033
+#define DEL \177
+#define NEWLINE '\n'
 
 int
 main(void)
 {
 	struct termios ancer, raw;
+	struct timespec sesp, act;
 	char c, word_buffer[50];
 	int x , i;
 	const char ps[] = "$> ";
@@ -19,14 +25,13 @@ main(void)
 	write(STDOUT_FILENO, ps, 4);
 
 	while(read(STDIN_FILENO, &c, 1)) {
-		if(c == '\177') {
-			if(i > 0) {
+		switch (c) {
+		case DEL:
+			if (x) {
 				write(STDIN_FILENO, "\b\033[X", 4);
 				word_buffer[--i] = '\0';
 			}
-		}
-		else
-		if(c == '\n') {
+		case NEWLINE:
 			write(STDOUT_FILENO, "\r\n", 2);
 			write(STDOUT_FILENO, ps, 4);
 			if(i < 50) {
