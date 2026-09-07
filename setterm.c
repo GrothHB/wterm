@@ -2,7 +2,6 @@
 #include <unistd.h>
 #include <termios.h>
 #include <string.h>
-#include <time.h>
 #include <limits.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -12,33 +11,57 @@
 #define NEWLINE '\n'
 #define OPENBSD_STYLE_CR 80 /* style(9) 80 column max */
 #define HISTORY_MAX_SIZE 100 
+#define PS_SIZE 4
+#define PS2_SIZE 4
 
-typedef struct {
+typedef enum {
 	UP,
 	DOWN,
 	SAVE,
 	CLEAR
 } hflags;
 
+struct i_word {
+	uint8_t idx;
+	char *word;
+};
+
+struct i_command {
+	uint8_t idx;
+	char *command;
+};
+
+struct cpkg {
+	struct i_command comm;
+	struct i_word crw;
+	char **history;
+	uint8_t *width;
+	hflags flag;
+};
+
+void clear_word(char , struct cpkg *);
+void disp_stream(char , struct cpkg *);
+void neutral(char, struct cpkg *) { return; };
+
 int
 main(void)
 {
 	struct termios ancer, raw;
-	struct timespec sesc, act, st, et;
 	char command[MAX_CANON];
 	char c, word_buffer[MAX_CANON];
 	char (*comand_hitory[HISTORY_MAX_SIZE]);
-	int x , i, rflag, sflag, tflag;
+	int x , i;
 	const char ps[] = "$> ";
-	x = i = sflag = tflag = 0;
+	const char ps2[] = ">  ";
+	x = i = 0;
 	tcgetattr(STDIN_FILENO, &ancer);
 	raw = ancer; 
 	cfmakeraw(&raw);
 	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-	write(STDOUT_FILENO, ps, 4);
+	write(STDOUT_FILENO, ps, PS_SIZE);
 	#include "keytable.h"
 
-	while(rflag = read(STDIN_FILENO, &c, 1)) {
+	while (read(STDIN_FILENO, &c, 1)) {
 		switch (c) {
 		case DEL:
 			if (x) {
@@ -196,3 +219,118 @@ hcntl(char *hoc[], hflags flag, ...)
 		break;
 	}
 }
+
+int
+check_limit(struct cpkg *pk)
+{
+	if (pk->comm.idx < MAX_CANON)
+		return 0;
+	if (pk->width = 80) {
+		write(STDIN_FILENO, "\n", 1);
+		wrtie(STDOUT_FILENO, &ps2, PS2_SIZE);
+		pk->width = 0;
+	}
+	return 1;
+}
+
+void
+disp_stream(char c, struct cpkg *pk)
+{
+	if (check_limit(pk)) {
+		write(STDOUT_FILENO, &c, 1);
+		pk->width++;
+		pk->crw.word[pk->crw.idx++] = c;
+		pk->comm.command[pk->comm.idx++] = c;
+	}
+}
+
+void
+clear_word(char c, struct cpkg *pk)
+{
+	pk->crw.word[0] = '\0';
+	pk->crw.idx = 0;
+	write(STDOUT_FILENO, &c, 1);
+	pk->comm.command[pk->comm.idx++] = c;
+	pk->width++;
+}
+
+void
+repaint(struct cpkg *pk)
+{
+	uint8_t width_off, i;
+	write(STDOUT_FILENO, &clear, 5);
+	write(STOUD_FILENO, pk->comm.command, pk->comm.idx);
+	width_off = pk->comm.idx - pk->width;
+	for (i = 0; i < width_off; ++i)
+		write(STDOUT_FILENO, "\b" , 1);
+}
+
+void
+set_on_word(struct cpkg *pk)
+{
+	if (pk->comm.command[pk->width] != ' ') {
+		uint8_t find = pk->width;
+		while (find >= 0 && pk->comm.command[find] != ' ')
+			--find;
+		pk->crw.idx = 0;
+		++find;
+		while (find < pk->width)
+			pk->crw.word[pk->crw.idx++] = pk->comm.command[find++];
+	}
+}
+void
+spec(char c, struct cpkg *pk)
+{
+	char sc[2];
+	int flag = fcntl(0, F_GETFD);
+	fcntl(0, f_SETFD, flag | O_NONBLOCK);
+
+	if (read(STDIN_FILENO, &sc, 2) == -1) {
+		write(STDOUT_FILENO, &messega, MESSAGE_SIZE);
+		fcntl(0, F_SETFD, flag);
+		read(STDIN_FILENO, &sc, 1);
+		if (sc[0] == 'y') {
+			if (!(check_limit(pk)))
+				return;
+			pk->comm.command[pk->comm.idx++] = c;
+			pk->cwr.word[pk->cwr.idx++] = c;
+			pk->width++;
+			write(STDOUT_FILENO, &c, 1);
+		}
+	} else {
+		if (sc[0] == '[') {
+			switch (sc[1]) {
+			case 'A':
+				pk->flag = UP;
+				hcntl(pk->history, pk->flag);
+				break;
+			case 'B':
+				pk->flag = DOWN;
+				hcntl(pk->history, pk->flag);
+				break;
+			case 'D':
+				if (pk->width > 0 )
+					pk->width--;
+				break;
+			case 'C':
+				if (pk->width < MAX_CANON)
+					pk->width++;
+				break;
+			}
+		}
+	}
+}
+
+void
+cans(char c, struct cpkg *pk)
+{
+	if (pk->width != pk->comm.idx && pk->width != 0) {
+		uint8_t form = pk->width - 1;
+		pk->comm.idx--;
+		pk->width--;
+		while (form < pk->comm.idx)
+			pk->comm.command[form] = pk->comm.command[form + 1];
+		repaint(pk);
+		set_on_word(pk);
+			
+	}
