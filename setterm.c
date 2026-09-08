@@ -55,7 +55,7 @@ main(void)
 	struct termios ancer, raw;
 	struct cpkg header;
 	char command[MAX_CANON];
-	unsigned char c;
+	char c;
 	char (*command_history[HISTORY_MAX_SIZE]);
 	const char ps[] = "$> ";
 	tcgetattr(STDIN_FILENO, &ancer);
@@ -77,6 +77,8 @@ main(void)
 	#include "keytable.h"
 
 	while (read(STDIN_FILENO, &c, 1)) {
+		if (c < 0)
+			continue;
 		ascii[c % 128](c, &header);
 	}
 
@@ -98,7 +100,7 @@ hcntl(char *hoc[], hflags flag, ...)
 			break;
 		--rbp;
 		write(STDOUT_FILENO, &clear, 7);
-		write(STDOUT_FILENO, &hoc[rbp], strlen(hoc[rbp]));
+		write(STDOUT_FILENO, hoc[rbp], strlen(hoc[rbp]));
 		break;
 	case DOWN:
 		if (rbp == rsp) 
@@ -106,7 +108,7 @@ hcntl(char *hoc[], hflags flag, ...)
 		++rbp;
 		write(STDOUT_FILENO, &clear, 8);
 		if (rbp != rsp)
-			write(STDOUT_FILENO, &hoc[rbp], strlen(hoc[rbp]));
+			write(STDOUT_FILENO, hoc[rbp], strlen(hoc[rbp]));
 		break;
 	case SAVE:
 		if (rsp == HISTORY_MAX_SIZE) {
@@ -115,13 +117,17 @@ hcntl(char *hoc[], hflags flag, ...)
 			free(hoc[0]);
 			for (i = 0; i < 99; ++i)
 				hoc[i] = hoc[i + 1];
-			hoc[99] = malloc(strlen(arg));
-		strncpy(hoc[99], arg, strlen(arg));
+			i = strlen(arg);
+			hoc[99] = malloc(i + 1);
+			strncpy(hoc[99], arg, i);
+			hoc[99][i] = '\0';
 			break;
 		} else {
 			const char *arg = va_arg(ap, const char *);
-			hoc[rsp] = malloc(strlen(arg));
-			strncpy(hoc[rsp], arg, strlen(arg));
+			int size = strlen(arg);
+			hoc[rsp] = malloc(size + 1);
+			strncpy(hoc[rsp], arg, size);
+			hoc[rsp][size] = '\0';
 			++rsp;
 			break;
 		}
