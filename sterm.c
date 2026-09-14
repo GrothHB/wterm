@@ -1,3 +1,6 @@
+#include <stddef.h>
+#include <sys/types.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -8,6 +11,9 @@
 #include <fcntl.h>
 #include <stdarg.h>
 #include <time.h>
+#include "keytable.h"
+#include "tab.h"
+#include "my_term.h"
 
 #define ESC '\033'
 #define DEL '\177'
@@ -19,18 +25,12 @@
 #define PS2_SIZE 4
 #define INLINE 0x01
 #define HISTORY 0x10
+#define BURN_N_REBUILD_MAX (MAX_CANON + ((MAX_CANON) / OPENBSD_MAX) * 5 + 32)
 
 typedef enum {
 	OLD,
 	NEW
 } state;
-
-typedef enum {
-	UP,
-	DOWN,
-	SAVE,
-	CLEAR
-} hflags;
 
 typedef enum {
 	M_LEFT,
@@ -44,21 +44,8 @@ typedef enum {
 	ID_LEFT
 } side;
 
-struct i_command {
-	uint8_t idx;
-	char *command;
-};
-
-struct cpkg {
-	struct i_command com;
-	struct termios base;
-	char **history;
-	int curs;
-	hflags flag;
-};
-
-void disp_stream(char , struct cpkg *);
-void neutral(char c, struct cpkg * pk) { (void)c; (void)pk; return; }
+void disp_stream(char, struct cpkg *);
+void neutral(char, struct cpkg *);
 void cans(char, struct cpkg *);
 void spec(char, struct cpkg *);
 void hcntl(struct cpkg *);
@@ -67,8 +54,6 @@ void clear_comm(char, struct cpkg *);
 void clear_page(struct cpkg *);
 void clear_mem(struct cpkg *);
 void parse_esc_com(char c, struct cpkg *);
-void parse_message_disp(struct cpkg *);
-void send_message(struct cpkg *);
 void assigne(char, struct cpkg *);
 void id_shift(side, struct cpkg *);
 void cursor_cntl(cm, struct cpkg *);
@@ -78,29 +63,28 @@ void set_cursor(int);
 void break_line(void);
 void set_vector(int *, int *, struct cpkg *);
 void burn_n_rebuild(struct cpkg *, uint8_t, int);
+void find_fill(char, struct cpkg *);
 
 int
 main(void)
 {
-	struct termios ancer, raw;
+	struct termios raw;
 	struct cpkg header;
 	char command[MAX_CANON + 1];
 	unsigned char c;
-	char (*command_history[HISTORY_MAX_SIZE + 1]);
+	char *command_history[HISTORY_MAX_SIZE + 1];
 	void (*ascii[128])(char c, struct cpkg *);
 	/* ascii array is declared in `keytable.h' */
+	init_ascii(ascii);
 	const char ps[] = "$> ";
-	char wall = '\0';
-	const char * const limit = &wall;
-	tcgetattr(STDIN_FILENO, &ancer);
+	tcgetattr(STDIN_FILENO, &header.base);
 	header.curs = 0;
 	header.com.idx = 0;
 	header.com.command = command;
 	header.history = command_history;
-	header.base = ancer;
 	header.flag = SAVE;
-	command_history[0] = (char *)limit;
-	raw = ancer; 
+	command_history[0] = NULL;
+	raw = header.base; 
 	cfmakeraw(&raw);
 	/* Setting enter to FL becouse in raw mode
 	 * it is defaulter as CR
@@ -108,7 +92,6 @@ main(void)
 	raw.c_iflag |= ICRNL;
 	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 	write(STDOUT_FILENO, ps, PS_SIZE);
-	#include "keytable.h"
 
 	while (read(STDIN_FILENO, &c, 1)) {
 		if (c & (1 << 7))
@@ -117,7 +100,7 @@ main(void)
 	}
 
 	clear_mem(&header);
-	tcsetattr(STDIN_FILENO, TCSANOW, &ancer);
+	tcsetattr(STDIN_FILENO, TCSANOW, &header.base);
 	return 0;
 }
 
@@ -170,8 +153,8 @@ disp_stream(char c, struct cpkg *pk)
 		memmove(dst, src, size);
 		pk->com.command[pk->curs] = c;
 		id_shift(ID_RIGHT, pk);
-		cursor_cntl(M_RIGHT, pk);
 		burn_n_rebuild(pk, INLINE, 0);
+		cursor_cntl(QR, pk);
 	} else {
 		assigne(c, pk);
 		id_shift(ID_RIGHT, pk);
@@ -192,7 +175,6 @@ spec(char c, struct cpkg *pk)
 
 	if (read(STDIN_FILENO, &sc, 2) == -1) {
 		fcntl(0, F_SETFL, flag);
-		send_message(pk);
 	} else {
 		fcntl(0, F_SETFL, flag);
 		if (sc[0] == '[')
@@ -219,18 +201,11 @@ cans(char c, struct cpkg *pk)
 void
 check_break(char c, struct cpkg *pk)
 {
-	const char dummy[] = "!]STOP[!@";
-	if (pk->com.idx == MAX_CANON)
-		return;
-	assigne(c, pk);
-	id_shift(ID_RIGHT, pk);
-	++pk->curs;
-	if (pk->com.idx >= 9)
-		if (strstr(pk->com.command, dummy) != NULL) {
-			write(STDOUT_FILENO, "\r\n", 2);
-			tcsetattr(STDIN_FILENO, TCSANOW, &pk->base);
-			exit(2);
-		}
+	(void)c;
+	write(STDOUT_FILENO, "\r\n", 2);
+	tcsetattr(STDIN_FILENO, TCSANOW, &pk->base);
+	clear_mem(pk);
+	exit(2);
 }
 
 void
@@ -241,41 +216,6 @@ clear_mem(struct cpkg *pk)
 		free(pk->history[i]);
 		pk->history[i] = NULL;
 		++i;
-	}
-}
-
-void
-send_message(struct cpkg *pk)
-{
-	struct cpkg state;
-	char mem[2];
-	char answer;
-	char message[] = "## Are you sure you want esc [Y/n]: ";
-	state.com.command = mem;
-	state.com.idx = 0;
-	state.curs = 0;
-	state.history = NULL;
-	write(STDOUT_FILENO, "\r\033[K", 4);
-	write(STDOUT_FILENO, &message, strlen(message));
-	while (read(STDIN_FILENO, &answer, 1)) {
-		if (answer == '\n')
-			break;
-		if (answer == 'n' || answer == 'Y') {
-			write(STDOUT_FILENO, &answer, 1);
-			state.com.idx = 1;
-			state.com.command[0] = answer;
-			state.com.command[1] = '\0';
-			state.curs = state.com.idx;
-		}
-		if (answer == DEL) {
-			parse_message_disp(&state);
-		}
-	}
-	if (answer == 'Y') {
-		if (pk->com.idx == MAX_CANON)
-			return;
-		assigne(ESC, pk);
-		id_shift(ID_RIGHT, pk);
 	}
 }
 
@@ -309,20 +249,6 @@ parse_esc_com(char c, struct cpkg *pk)
 }
 
 void
-parse_message_disp(struct cpkg *pk)
-{
-	char mess[] = "## Are you sure you want esc [Y/n]: ";
-	const char clear[] = "\r\033[K";
-	pk->com.command[0] = '\0';
-	pk->com.idx--;
-	pk->curs--;
-	write(STDOUT_FILENO, &clear, 4);
-	write(STDOUT_FILENO, &mess, strlen(mess));
-	write(STDOUT_FILENO, pk->com.command, pk->com.idx);
-	return;
-}
-
-void
 cursor_cntl(cm action, struct cpkg *pk)
 {
 	switch (action) {
@@ -337,6 +263,11 @@ cursor_cntl(cm action, struct cpkg *pk)
 		break;
 	case QL:
 		if (pk->curs > 0) {
+			if (pk->curs % OPENBSD_MAX == 0 && pk->curs > 0) {
+				write(STDOUT_FILENO, "\033[A", 3);
+				set_cursor(--pk->curs);
+				break;
+			}
 			--pk->curs;
 			write(STDOUT_FILENO, "\033[D", 3);
 		}
@@ -345,6 +276,11 @@ cursor_cntl(cm action, struct cpkg *pk)
 		if (pk->curs == pk->com.idx)
 			break;
 		++pk->curs;
+		if (pk->curs % OPENBSD_MAX == 0 && pk->curs > 0) {
+			write(STDOUT_FILENO, "\033[B", 3);
+			set_cursor(pk->curs);
+			break;
+		}
 		write(STDOUT_FILENO, "\033[C", 3);
 		break;
 	}
@@ -380,40 +316,36 @@ assigne(char c, struct cpkg *pk)
 void
 push_memory(int *rsp, struct cpkg *pk)
 {
+	int len;
+	char *ptr;
+	len = strlen(pk->com.command);
+	if ((ptr = malloc(len + 1)) == NULL)
+		return;
+	
+	strlcpy(ptr, pk->com.command, len + 1);
 	if (*rsp == HISTORY_MAX_SIZE) {
-		int len;
-		char *ptr;
 		size_t size = (HISTORY_MAX_SIZE - 1) * sizeof(char *);
 		free(pk->history[0]);
 		memmove(&pk->history[0], &pk->history[1], size);
-		len = strlen(pk->com.command);
-		if ((ptr = malloc(len + 1)) == NULL)
-			return;
-		strlcpy(ptr, pk->com.command, len + 1);
 		pk->history[HISTORY_MAX_SIZE - 1] = ptr;
 	} else {
-		char *ptr;
-		int len = strlen(pk->com.command);
-		if ((ptr = malloc(len + 1)) == NULL)
-			return;
-		strlcpy(ptr, pk->com.command, len + 1);
 		pk->history[*rsp + 1] = pk->history[*rsp];
 		pk->history[*rsp] = ptr;
 		++(*rsp);
-		pk->history[*rsp][0] = '\0';
 	}
 }
 
 void
 push_command(int rbp, struct cpkg *pk)
 {
-	size_t size = strlen(pk->history[rbp]);
-	if (size == 0) {
+	size_t size;
+	if (pk->history[rbp] == NULL) {
 		pk->com.command[0] = '\0';
 		pk->com.idx = 0;
 		pk->curs = 0;
 		return;
 	}
+	size = strlen(pk->history[rbp]);
 	strlcpy(pk->com.command, pk->history[rbp], size + 1);
 	pk->com.command[size] = '\0';
 	pk->com.idx = size;
@@ -434,15 +366,24 @@ set_cursor(int position)
 void
 clear_comm(char c, struct cpkg *pk)
 {
+	int len, slide, linep;
+	char buf[32];
 	(void)c;
 	pk->flag = SAVE;
 	hcntl(pk);
 	pk->flag = CLEAR;
 	hcntl(pk);
+	linep = (pk->com.idx > 0) ? ((pk->com.idx - 1) / OPENBSD_MAX): 0; 
+	slide = linep - (pk->curs / OPENBSD_MAX);
+	if (slide) {
+		len = snprintf(buf, sizeof(buf), "\033[%dB\n\r$> ", slide);
+		write(STDOUT_FILENO, buf, len);
+	} else {
+		write(STDOUT_FILENO, "\n\r$> ", 5);
+	}
 	pk->curs = 0;
 	pk->com.idx = 0;
 	pk->com.command[0] = '\0';
-	write(STDOUT_FILENO, "\n\r$> ", 5);
 }
 
 void
@@ -478,18 +419,16 @@ set_vector(int *x, int *y, struct cpkg *pk)
 void
 burn_n_rebuild(struct cpkg *pk, uint8_t state, int old_curs)
 {
-	char buffer[350];
+	char buffer[BURN_N_REBUILD_MAX];
 	size_t len, bsize;
 	int y, iter, cl;
 	bsize = sizeof(buffer);
 	if (state == INLINE) {
-		/* cond is able to get only values
-		 * such as 0 or 1. It guard edge cases
-		 * like pk->com.idx == 154
-		 */
-		int cond = !(pk->com.idx % OPENBSD_MAX);
+		int linep;
 		y = pk->curs / OPENBSD_MAX;
-		cl = ((pk->com.idx / OPENBSD_MAX) - y) - cond;
+		linep = (pk->com.idx - 1) / OPENBSD_MAX;
+		linep = (pk->com.idx > 0) ? linep: 0;
+		cl = linep - y;
 	}
 	if (state == HISTORY) {
 		y = old_curs / OPENBSD_MAX;
@@ -497,8 +436,9 @@ burn_n_rebuild(struct cpkg *pk, uint8_t state, int old_curs)
 	}
 	if (y)
 		len = snprintf(buffer, bsize, "\033[%dA\r\033[J", y);
-	else len = snprintf(buffer, bsize, "\r\033[J");
-	len += snprintf(&buffer[len], OPENBSD_MAX, "$> ");
+	else
+		len = snprintf(buffer, bsize, "\r\033[J");
+	len += snprintf(&buffer[len], bsize - len, "$> ");
 	for (iter = 0; iter < pk->com.idx; ++iter) {
 		if (iter % OPENBSD_MAX == 0 && iter > 0) {
 			buffer[len++] = '\n';
@@ -510,7 +450,49 @@ burn_n_rebuild(struct cpkg *pk, uint8_t state, int old_curs)
 		buffer[len++] = pk->com.command[iter];
 	}
 	if (cl)
-		len += snprintf(&buffer[len], bsize, "\033[%dA", cl);
+		len += snprintf(&buffer[len], bsize - len, "\033[%dA", cl);
 	write(STDOUT_FILENO, buffer, len);
 	set_cursor(pk->curs);
+}
+
+void
+neutral(char c, struct cpkg *pk)
+{
+	(void)c;
+	(void)pk;
+}
+
+void
+find_fill(char c, struct cpkg *pk)
+{
+	char *fill_word;
+	int fidx, old_curs;
+	size_t len;
+	(void)c;
+	/*if (pk->com.idx == 0)
+		return;*/
+	if ((fill_word = fill_command(get_looking_word(pk))) == NULL) {
+		burn_n_rebuild(pk, HISTORY, 0);
+		return;
+	}
+	for (fidx = pk->com.idx; pk->com.command[fidx] != ' '; --fidx)
+		if (fidx == 0)
+			break;
+	if ((len = strlen(fill_word)) + fidx > MAX_CANON)
+		burn_n_rebuild(pk, HISTORY, 0);
+		
+	strlcpy(&pk->com.command[fidx], fill_word, MAX_CANON + 1 - fidx);
+	if (len + fidx + 2 > MAX_CANON) {
+		pk->com.idx = fidx + len;
+		old_curs = pk->curs;
+		pk->curs = pk->com.idx;
+		burn_n_rebuild(pk, HISTORY, old_curs);
+		return;
+	}
+	pk->com.idx = fidx + len;
+	old_curs = pk->curs;
+	pk->com.command[pk->com.idx++] = ' ';
+	pk->com.command[pk->com.idx] = '\0';
+	pk->curs = pk->com.idx;
+	burn_n_rebuild(pk, HISTORY, old_curs);
 }
