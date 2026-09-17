@@ -1,6 +1,11 @@
+#define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
+#define _ISOC99_SOURCE
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,112 +15,124 @@
 #include <unistd.h>
 #include "my_term.h"
 
-/*#define _POSIX_C_SOURCE 200809L*/
-/*#define _DEFAULT_SOURCE*/
-#define _ISOC99_SOURCE
-#define SEARCH_FAIL 0x01
 #define OPENBSD_MAX 76
+
+int
+message(int nf)
+{
+	char buffer[50], c;
+	int len = snprintf(buffer, sizeof(buffer), "\r\033[K"
+			   "Finded %d posibilites. Display [Y/n]", nf);
+	write(STDOUT_FILENO, buffer, len);
+	while (read(STDIN_FILENO, &c, 1)) {
+		if (c == 'Y')
+			return (0);
+		if (c == 'n')
+			return (1);
+	}
+	return (1);
+}
 
 int
 fcompare(const void* x, const void* y)
 {
-	return strcmp(*(char**)x, *(char**)y);
+	return (strcmp(*(char**)x, *(char**)y));
 }
 
 char *
-get_looking_word(struct cpkg *pk)
+fill_command(char *word, char *path)
 {
-	int lidx, size;
-	char *ptr;
-	for (lidx = pk->com.idx - 1; pk->com.command[lidx] != ' '; --lidx)
-		if (lidx == 0)
-			break;
-	size = strlen(&pk->com.command[lidx]);
-	if ((ptr = malloc(size + 1)) == NULL)
-		return NULL;
-	strlcpy(ptr, &pk->com.command[lidx], size + 1);
-	return ptr;
-}
-
-char *
-fill_command(char *word)
-{
-	DIR* ptr;
-	struct dirent *dir_list;
-	struct stat btyp;
-	char **farray, **tmp;
-	size_t c_size, c_index, i, bsize, len, strsize;
-	int sflag, max_length, num_of_finded;
-	char bufer[PATH_MAX + 1], *sciezka, teststr;
-	char sbuf[OPENBSD_MAX + 32];
+	DIR* 			ptr;
+	struct dirent 		*dir_list;
+	struct stat 		btyp;
+	char 			**farray, **tmp, *t;
+	static char		ret[] = "NOTFOUND";
+	static char		retmulti[] = "MFOUND";
+	size_t 			c_size, c_index, i, bsize, len, strsize;
+	size_t 			max_length;
+	int			fst;
+	char 			sbuf[OPENBSD_MAX + 32];
 	bsize = sizeof(sbuf);
-	c_index = sflag = max_length = num_of_finded = 0;
+	c_index = max_length = 0;
 	c_size = 1;
 	farray = malloc(sizeof(char*));
-	if ((sciezka = getcwd(bufer, PATH_MAX)) == NULL)
-		return NULL;
 
-	if ((ptr = opendir(sciezka)) == NULL)
-		return NULL;
+	if ((ptr = opendir(path)) == NULL) {
+		free(farray);
+		return (NULL);
+	}
 
 	while ((dir_list = readdir(ptr)) != NULL) {
-		if (dir_list->d_name[0] == '.')
-			continue;
+		if (word[0] != '.')
+			if (dir_list->d_name[0] == '.')
+				continue;
 		strsize = strlen(word);
-		if (strlen(dir_list->d_name) < strsize)
+		if (strlen(dir_list->d_name) < strsize && strsize > 0)
 			continue;
-		teststr = dir_list->d_name[strsize];
-		dir_list->d_name[strsize] = '\0';
-		if (strcmp(dir_list->d_name, word) != 0)
-			continue;
-		dir_list->d_name[strsize] = teststr;
-		if (strsize > max_length)
-			max_length = strsize;
-		++num_of_finded;
+		if (strsize > 0)
+			if (strncmp(dir_list->d_name, word, strsize) != 0)
+				continue;
+		if (strlen(dir_list->d_name) > max_length)
+			max_length = strlen(dir_list->d_name);
 		
 		if (c_index == c_size) {
 			size_t size = sizeof(char*);
 			c_size *= 2;
-			if ((tmp = reallocarray(farray, c_size, size)) == NULL) {
-				sflag = SEARCH_FAIL;
-				break;
-			}
-			else {
+			if ((tmp = reallocarray(farray, c_size, size)) == NULL)
+				goto clean;
+			else
 				farray = tmp;
-			}
 		}
-		if (stat(dir_list->d_name, &btyp) == -1)
+		fst = fstatat(dirfd(ptr), dir_list->d_name, &btyp, AT_SYMLINK_NOFOLLOW);
+		if (fst == -1)
 			continue;
 		if (S_ISDIR(btyp.st_mode)) {
 			char disp_name[NAME_MAX + 2];
 			size_t size = sizeof(disp_name);
 			snprintf(disp_name, size, "%s/", dir_list->d_name);
-			farray[c_index] = strdup(disp_name);
+			if ((t = strdup(disp_name)) == NULL)
+				goto clean;
+			else
+				farray[c_index] = t;
 		}
 		else {
-			farray[c_index] = strdup(dir_list->d_name);
+			if ((t = strdup(dir_list->d_name)) == NULL)
+				goto clean;
+			else 
+				farray[c_index] = t;
 		}
 		c_index++;
 	}
 
-	if (sflag == SEARCH_FAIL)
-		return NULL;
 	qsort(farray, c_index, sizeof(char*), fcompare);
-	if (c_index == 1)
-		return farray[0];
+	if (c_index == 1) {
+		char *fw = farray[0];
+		closedir(ptr);
+		free(farray);
+		return (fw);
+	}
+	if (c_index >= 50)
+		if (message(c_index))
+			goto clean;
+	if (c_index == 0) {
+		free(farray);
+		closedir(ptr);
+		return (ret);
+	}
 	write(STDOUT_FILENO, "\n\r", 2);
 	len = 0;
-	for(i = 0; i < c_index; ++i) {
-		size_t size = strlen(farray[i]);
-		if (len + size + 1 > bsize)
-			break;
-		if (len + size + 1 > OPENBSD_MAX) {
+	for (i = 0; i < c_index; ++i) {
+		if (max_length + 1 + len > bsize) {
+			write(STDOUT_FILENO, sbuf, len);
+			len = 0;
+		}
+		if (max_length + 1 + len > OPENBSD_MAX) {
 			len += snprintf(&sbuf[len], bsize - len, "\n\r");
 			write(STDOUT_FILENO, sbuf, len);
 			len = 0;
 		}
 		len += snprintf(&sbuf[len], bsize - len, "%-*s  ", 
-				max_length, farray[i]);
+				(int)max_length, farray[i]);
 		free(farray[i]);
 		farray[i] = NULL;
 	}
@@ -125,8 +142,12 @@ fill_command(char *word)
 	}
 	free(farray);
 	farray = NULL;
-	free(word);
-	word = NULL;
 	closedir(ptr);
-	return NULL;
+	return (retmulti);
+clean:
+	for (i = 0; i < c_index; ++i)
+		free(farray[i]);
+	closedir(ptr);
+	free(farray);
+	return (NULL);
 }

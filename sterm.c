@@ -1,6 +1,6 @@
-#include <stddef.h>
 #include <sys/types.h>
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -19,61 +19,59 @@
 #define DEL '\177'
 #define NEWLINE '\n'
 #define OPENBSD_MAX 77 /* style(9) 80 column max */
-#define HISTORY_MAX_SIZE 100 
+#define HISTORY_MAX_SIZE 250 
 #define MAX_Y ((MAX_CANON / OPENBSD_MAX) * OPENBSD_MAX)
 #define PS_SIZE 4
 #define PS2_SIZE 4
-#define INLINE 0x01
-#define HISTORY 0x10
 #define BURN_N_REBUILD_MAX (MAX_CANON + ((MAX_CANON) / OPENBSD_MAX) * 5 + 32)
 
-typedef enum {
-	OLD,
-	NEW
-} state;
+enum rebuild {
+	INLINE,
+	HISTORY
+}; 
 
-typedef enum {
+enum cursmov{
 	M_LEFT,
 	M_RIGHT,
 	QR,
 	QL
-} cm;
+};
 
-typedef enum {
+enum sid{
 	ID_RIGHT,
 	ID_LEFT
-} side;
+};
 
-void disp_stream(char, struct cpkg *);
-void neutral(char, struct cpkg *);
-void cans(char, struct cpkg *);
-void spec(char, struct cpkg *);
-void hcntl(struct cpkg *);
-void check_break(char, struct cpkg *);
-void clear_comm(char, struct cpkg *);
-void clear_page(struct cpkg *);
-void clear_mem(struct cpkg *);
-void parse_esc_com(char c, struct cpkg *);
-void assigne(char, struct cpkg *);
-void id_shift(side, struct cpkg *);
-void cursor_cntl(cm, struct cpkg *);
-void push_memory(int *, struct cpkg *);
-void push_command(int, struct cpkg *);
-void set_cursor(int);
-void break_line(void);
-void set_vector(int *, int *, struct cpkg *);
-void burn_n_rebuild(struct cpkg *, uint8_t, int);
-void find_fill(char, struct cpkg *);
+void 		disp_stream(char, struct cpkg *);
+void 		neutral(char, struct cpkg *);
+void 		cans(char, struct cpkg *);
+void 		spec(char, struct cpkg *);
+void 		hcntl(struct cpkg *);
+void 		check_break(char, struct cpkg *);
+void 		clear_comm(char, struct cpkg *);
+void 		clear_page(struct cpkg *);
+void 		clear_mem(struct cpkg *);
+void 		parse_esc_com(char c, struct cpkg *);
+void 		assigne(char, struct cpkg *);
+void 		id_shift(enum sid, struct cpkg *);
+void 		cursor_cntl(enum cursmov, struct cpkg *);
+void 		push_memory(int *, struct cpkg *);
+void 		push_command(int, struct cpkg *);
+void 		set_cursor(int);
+void 		break_line(void);
+void 		burn_n_rebuild(struct cpkg *, enum rebuild, int);
+void 		find_fill(char, struct cpkg *);
+void		shift_n_fill(struct cpkg *, int , char *, word_t);
 
 int
 main(void)
 {
-	struct termios raw;
-	struct cpkg header;
-	char command[MAX_CANON + 1];
-	unsigned char c;
-	char *command_history[HISTORY_MAX_SIZE + 1];
-	void (*ascii[128])(char c, struct cpkg *);
+	struct termios 	raw;
+	struct cpkg 	header;
+	char 		command[MAX_CANON + 1];
+	unsigned char 	c;
+	char 		*command_history[HISTORY_MAX_SIZE + 1];
+	void 		(*ascii[128])(char c, struct cpkg *);
 	/* ascii array is declared in `keytable.h' */
 	init_ascii(ascii);
 	const char ps[] = "$> ";
@@ -101,13 +99,13 @@ main(void)
 
 	clear_mem(&header);
 	tcsetattr(STDIN_FILENO, TCSANOW, &header.base);
-	return 0;
+	return (0);
 }
 
 void
 hcntl(struct cpkg *pk)
 {
-	int prev_curs;
+	int 		prev_curs;
 	static int rbp = 0;
 	static int rsp = 0;
 	switch (pk->flag) {
@@ -164,9 +162,9 @@ disp_stream(char c, struct cpkg *pk)
 void
 spec(char c, struct cpkg *pk)
 {
-	(void)c;
 	struct timespec timeout, inttime;
-	char sc[2];
+	char 		sc[2];
+	(void)c;
 	int flag = fcntl(0, F_GETFL);
 	fcntl(0, F_SETFL, flag | O_NONBLOCK);
 	timeout.tv_sec = 0;
@@ -249,7 +247,7 @@ parse_esc_com(char c, struct cpkg *pk)
 }
 
 void
-cursor_cntl(cm action, struct cpkg *pk)
+cursor_cntl(enum cursmov action, struct cpkg *pk)
 {
 	switch (action) {
 	case M_LEFT:
@@ -287,7 +285,7 @@ cursor_cntl(cm action, struct cpkg *pk)
 }
 
 void
-id_shift(side s, struct cpkg *pk)
+id_shift(enum sid s, struct cpkg *pk)
 {
 	switch (s) {
 	case ID_RIGHT:
@@ -316,8 +314,8 @@ assigne(char c, struct cpkg *pk)
 void
 push_memory(int *rsp, struct cpkg *pk)
 {
-	int len;
-	char *ptr;
+	int 		len;
+	char 		*ptr;
 	len = strlen(pk->com.command);
 	if ((ptr = malloc(len + 1)) == NULL)
 		return;
@@ -338,7 +336,7 @@ push_memory(int *rsp, struct cpkg *pk)
 void
 push_command(int rbp, struct cpkg *pk)
 {
-	size_t size;
+	size_t 		size;
 	if (pk->history[rbp] == NULL) {
 		pk->com.command[0] = '\0';
 		pk->com.idx = 0;
@@ -355,8 +353,8 @@ push_command(int rbp, struct cpkg *pk)
 void
 set_cursor(int position)
 {
-	char max_mov[7];
-	int len;
+	char 		max_mov[7];
+	int 		len;
 	position %= OPENBSD_MAX;
 	position += 3;
 	len = snprintf(max_mov, sizeof(max_mov), "\r\033[%dC", position);
@@ -366,8 +364,8 @@ set_cursor(int position)
 void
 clear_comm(char c, struct cpkg *pk)
 {
-	int len, slide, linep;
-	char buf[32];
+	int 		len, slide, linep;
+	char 		buf[32];
 	(void)c;
 	pk->flag = SAVE;
 	hcntl(pk);
@@ -389,9 +387,9 @@ clear_comm(char c, struct cpkg *pk)
 void
 clear_page(struct cpkg *pk)
 {
-	const char erease_one_up[] = "\r\033[K\033[A";
-	const char clean[] = "\033[K";
-	int iter, times;
+	const char 	erease_one_up[] = "\r\033[K\033[A";
+	const char 	clean[] = "\033[K";
+	int 		iter, times;
 	int len_er_one_up = strlen(erease_one_up);
 	times = pk->com.idx / OPENBSD_MAX;
 	for (iter = 0; iter < times; ++iter)
@@ -402,29 +400,22 @@ clear_page(struct cpkg *pk)
 void
 break_line(void)
 {
-	char ps2[] = ">  ";
-	char bline[] = "\n\r";
+	char 		ps2[] = ">  ";
+	char 		bline[] = "\n\r";
 	write(STDOUT_FILENO, bline, strlen(bline));
 	write(STDOUT_FILENO, ps2, strlen(ps2));
 }
 
 void
-set_vector(int *x, int *y, struct cpkg *pk)
+burn_n_rebuild(struct cpkg *pk, enum rebuild state, int old_curs)
 {
-	pk->com.idx = strlen(pk->com.command) + 1;
-	*x = pk->curs % OPENBSD_MAX;
-	*y = pk->com.idx / OPENBSD_MAX;
-}
-
-void
-burn_n_rebuild(struct cpkg *pk, uint8_t state, int old_curs)
-{
-	char buffer[BURN_N_REBUILD_MAX];
-	size_t len, bsize;
-	int y, iter, cl;
+	char 		buffer[BURN_N_REBUILD_MAX];
+	size_t 		len, bsize;
+	int 		y, iter, cl;
+	cl = y = 0;
 	bsize = sizeof(buffer);
 	if (state == INLINE) {
-		int linep;
+		int 	linep;
 		y = pk->curs / OPENBSD_MAX;
 		linep = (pk->com.idx - 1) / OPENBSD_MAX;
 		linep = (pk->com.idx > 0) ? linep: 0;
@@ -465,34 +456,118 @@ neutral(char c, struct cpkg *pk)
 void
 find_fill(char c, struct cpkg *pk)
 {
-	char *fill_word;
-	int fidx, old_curs;
-	size_t len;
+	char 		path[PATH_MAX], word[MAX_CANON]; 
+	char 		*dummy, **xdirs;
+	int 		fidx, sofw, xf, i, old_curs;
+	word_t		sword;
 	(void)c;
-	/*if (pk->com.idx == 0)
-		return;*/
-	if ((fill_word = fill_command(get_looking_word(pk))) == NULL) {
-		burn_n_rebuild(pk, HISTORY, 0);
-		return;
-	}
-	for (fidx = pk->com.idx; pk->com.command[fidx] != ' '; --fidx)
-		if (fidx == 0)
-			break;
-	if ((len = strlen(fill_word)) + fidx > MAX_CANON)
-		burn_n_rebuild(pk, HISTORY, 0);
-		
-	strlcpy(&pk->com.command[fidx], fill_word, MAX_CANON + 1 - fidx);
-	if (len + fidx + 2 > MAX_CANON) {
-		pk->com.idx = fidx + len;
-		old_curs = pk->curs;
-		pk->curs = pk->com.idx;
-		burn_n_rebuild(pk, HISTORY, old_curs);
-		return;
-	}
-	pk->com.idx = fidx + len;
 	old_curs = pk->curs;
-	pk->com.command[pk->com.idx++] = ' ';
-	pk->com.command[pk->com.idx] = '\0';
-	pk->curs = pk->com.idx;
+	xf = i = 0;
+	dummy = NULL;
+	sword = parse(pk);
+	sofw = pk->curs - sword.sidx;
+	strlcpy(word, &pk->com.command[sword.sidx], sofw + 1);
+	switch (sword.type) {
+	case RFILE:
+	case INWORD:
+	case FEXEC:
+		if (getcwd(path, PATH_MAX) == NULL)
+			return;
+		if ((dummy = fill_command(word, path)) == NULL)
+			break;
+		if (strcmp(dummy, "NOTFOUND") == 0)
+			break;
+		if (strcmp(dummy, "MFOUND") == 0)
+			break;
+		shift_n_fill(pk, sofw, dummy, sword);
+		break;
+	case DIRECT:
+		if (pk->curs == 1 || pk->com.command[pk->curs - 1] == '/') {
+			if ((dummy = fill_command("", word)) == NULL)
+				break;
+			if (strcmp(dummy, "NOTFOUND") == 0)
+				break;
+			if (strcmp(dummy, "MFOUND") == 0)
+				break;
+			shift_n_fill(pk, sofw, dummy, sword);
+			break;
+		}
+		for (fidx = strlen(word) - 1; fidx > 0; --fidx) {
+			if (word[fidx] == '/')
+				break;
+		}
+		strlcpy(path, word, fidx + 1);
+		if ((dummy = fill_command(&word[fidx + 1], path)) == NULL)
+			break;
+		if (strcmp(dummy, "NOTFOUND") == 0)
+			break;
+		if (strcmp(dummy, "MFOUND") == 0)
+			break;
+		shift_n_fill(pk, sofw, dummy, sword);
+		break;
+	case EXEC:
+	case INFST:
+		if ((xdirs = exec_paths(&xf)) == NULL)
+			return;
+		if (strlen(word) == 0)
+			dummy = fill_command("", xdirs[0]);
+		if (dummy == NULL || (strcmp(dummy, "NOTFOUND") == 0)) {
+			for (i = 0; i < xf; ++i) {
+				dummy = fill_command(word, xdirs[i]);
+				if (dummy == NULL) {
+					free(xdirs[i]);
+					continue;
+				}
+				if (strcmp(dummy, "NOTFOUND") == 0) {
+					free(xdirs[i]);
+					continue;
+				}
+				break;
+			}
+		}
+		if (dummy != NULL && strcmp(dummy, "NOTFOUND") != 0
+			 	  && strcmp(dummy, "MFOUND") != 0)
+			shift_n_fill(pk, sofw, dummy, sword);
+		for (; i < xf; ++i)
+			free(xdirs[i]);
+		free(xdirs);
+		break;
+	}
 	burn_n_rebuild(pk, HISTORY, old_curs);
+}
+
+void
+shift_n_fill(struct cpkg *pk, int sofw, char *dummy, word_t sword)
+{
+	int		ntm, fwh;
+	char		*dst, *src;
+	size_t		size, len;
+	fwh = 1;
+	if (strcmp(dummy, "NOTFOUND") == 0 || dummy == NULL)
+		return;
+	if (pk->curs != pk->com.idx) {
+		fwh = 0;
+		if (pk->com.idx + (strlen(dummy) - sofw) > MAX_CANON) {
+			free(dummy);
+			dummy = NULL;
+			return;
+		}
+	} else if (pk->com.idx + (strlen(dummy) - sofw) + 1 > MAX_CANON) {
+		free(dummy);
+		dummy = NULL;
+		return;
+	}
+	len = strlen(dummy);
+	ntm = len - sofw + 1 *fwh;
+	src = &pk->com.command[pk->curs];
+	dst = &pk->com.command[pk->curs + ntm];
+	size = pk->com.idx - pk->curs;
+	memmove(dst, src, size + 1);
+	memcpy(&pk->com.command[sword.sidx], dummy, len);
+	if (fwh)
+		pk->com.command[sword.sidx + len] = ' ';
+	pk->curs = sword.sidx + len + 1 * fwh;
+	pk->com.idx += ntm;
+	free(dummy);
+	dummy = NULL;
 }
