@@ -26,24 +26,28 @@ parse(struct cpkg *pk)
 			lw.type = EXEC;
 			break;
 		case ' ':
-			if (lw.type == INFST || lw.type == INWORD
-					     || lw.type == DIRECT) {
+			if (lw.type == INFST || lw.type == INWORD ||
+			    lw.type == DIRECT) {
 				lw.type = FEXEC;
+				lw.sidx = i;
 				break;
 			}
+			if (lw.type == UNKNOWN)
+				lw.type = FEXEC;
 			if (lw.type == QUOAT || lw.type == SQUOAT)
 				break;
+			lw.sidx = i;
 			break;
 		case '/': 
 			if (lw.type == FEXEC)
 				break;
-			if (i == 0 || pk->com.command[i-1] == ' '
-				   || lw.type == PDIRECT)
+			if (i == 0 || pk->com.command[i-1] == ' ')
 				lw.sidx = i;
 			lw.type = DIRECT;
 			break;
 		case '.':
-			lw.type = FEXEC;
+			lw.type = DOT;
+			lw.sidx = i;
 			break;
 		case '\"':
 			if (lw.type == QUOAT)
@@ -65,6 +69,7 @@ parse(struct cpkg *pk)
 			break;
 		case '~':
 			lw.type = PDIRECT;
+			lw.sidx = i;
 			break;
 		case '\\':
 			lw.type = ESCQUOAT;
@@ -85,6 +90,10 @@ parse(struct cpkg *pk)
 			}
 			if (lw.type == QUOAT || lw.type == SQUOAT)
 				break;
+			if (lw.type == PDIRECT)
+				lw.type = UNKNOWN;
+			if (lw.type == DOT)
+				lw.type = INWORD;
 			break;
 		}
 	}
