@@ -1,26 +1,32 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include "my_term.h"
+#include "openbsd.h"
+#include "tab.h"
 
 char **
 exec_paths(int *npaths)
 {
 	char 		**stable, **fsd, *path, *pol;
-	size_t 		npath, i, lidx, c_size;
+	size_t 		npath, i, lidx, c_size, lpath;
+	size_t size = sizeof(char *);
 	lidx = npath = 0;
 	c_size = 16;
-	if ((fsd = malloc(c_size * sizeof(char **))) == NULL)
+	if ((fsd = malloc(c_size * size)) == NULL)
 		return (NULL);
 	stable = fsd;
 	if ((pol= getenv("PATH")) == NULL)
 		goto precleanup;
 	if ((path = strdup(pol)) == NULL)
 		goto precleanup;
-	for (i = 0; i < strlen(path); ++i) {
+	lpath = strlen(path) + 1;
+	for (i = 0; i < lpath; ++i) {
 		if (npath == c_size - 1) {
 			char **p = stable;
-			size_t size = sizeof(char **);
 			c_size *= 2;
 			if ((fsd = reallocarray(p, c_size, size)) == NULL)
 				goto clean;
