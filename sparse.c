@@ -1,101 +1,118 @@
 #include "my_term.h"
+#include "tab.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-word_t
+struct word_t
 parse(struct cpkg *pk)
 {
-	int i;
-	word_t lw;
-	char c;
+	int 		i, wflag;
+	enum lex_state	state, prev_state;
+	struct word_t 	lw;
+	char 		c;
 	lw.type = EXEC;
-	lw.sidx = 0;
+	lw.sidx = wflag = 0;
+	state = LEX_NORMAL;
 	for (i = 0; i < pk->curs; ++i) {
 		c = pk->com.command[i];
-		switch (c) {
-		case '>':
-			lw.type = RFILE;
-			break;
-		case '&':
-		case '|':
-		case '<':
-		case '(':
-		case ';':
-			lw.type = EXEC;
-			break;
-		case ' ':
-			if (lw.type == INFST || lw.type == INWORD ||
-			    lw.type == DIRECT) {
+		switch (state) {
+		case LEX_NORMAL:
+			switch (c) {
+			case '>':
 				lw.type = FEXEC;
-				lw.sidx = i;
+				wflag = 0;
+				break;
+			case '&':
+			case '|':
+			case '<':
+			case '(':
+			case ';':
+				wflag = 0;
+				lw.type = EXEC;
+				break;
+			case '/': 
+				lw.type = DIRECT;
+				if (!wflag) {
+					lw.sidx = i;
+					wflag = 1;
+				}
+				break;
+			case ' ':
+				wflag = 0;
+				if (lw.type != EXEC)
+					lw.type = FEXEC;
+				break;
+			case '.':
+				if (!wflag) {
+					lw.type = DOT;
+					wflag = 1;
+					lw.sidx = i;
+				}
+				break;
+			case '\"':
+				state = LEX_IN_QUOTE;
+				if (!wflag) {
+					wflag = 1;
+					lw.sidx = i;
+				}
+				break;
+			case '\'':
+				state = LEX_IN_SQUOTE;
+				if (!wflag) {
+					wflag = 1;
+					lw.sidx = i;
+				}
+				break;
+			case '~':
+				if (!wflag) {
+					lw.type = PDIRECT;
+					lw.sidx = i;
+					wflag = 1;
+				}
+				break;
+			case '\\':
+				if (!wflag) {
+					prev_state = state;
+					state = LEX_ESCAPE;
+					lw.sidx = i;
+					wflag = 1;
+				}
+				break;
+			case '\n':
+			case '\0':
+				break;
+			default:
+				if (!wflag) {
+					lw.sidx = i;
+					wflag = 1;
+					if (lw.type == FEXEC)
+						lw.type = INWORD;
+					else if (lw.type == EXEC)
+						lw.type = INFST;
+				}
 				break;
 			}
-			if (lw.type == UNKNOWN)
-				lw.type = FEXEC;
-			if (lw.type == QUOAT || lw.type == SQUOAT)
-				break;
-			lw.sidx = i;
 			break;
-		case '/': 
-			if (lw.type == FEXEC)
-				break;
-			if (i == 0 || pk->com.command[i-1] == ' ')
-				lw.sidx = i;
-			lw.type = DIRECT;
-			break;
-		case '.':
-			lw.type = DOT;
-			lw.sidx = i;
-			break;
-		case '\"':
-			if (lw.type == QUOAT)
-				lw.type = RFILE;
-			else if (lw.type == ESCQUOAT)
-				lw.type = QUOAT;
-			else
-				lw.type = QUOAT;
-			break;
-		case '\'':
-			if (lw.type == QUOAT)
-				break;
-			else if (lw.type == ESCQUOAT)
-				lw.type = SQUOAT;
-			else if (lw.type == SQUOAT)
-				lw.type = RFILE;
-			else
-				lw.type = SQUOAT;
-			break;
-		case '~':
-			lw.type = PDIRECT;
-			lw.sidx = i;
-			break;
-		case '\\':
-			lw.type = ESCQUOAT;
-			break;
-		case '\n':
-		case '\0':
-			break;
-		default:
-			if (lw.type == EXEC) {
-				lw.sidx = i;
-				lw.type = INFST;
-				break;
+		case LEX_IN_QUOTE:
+			if (c == '\\') {
+				prev_state = state;
+				state = LEX_ESCAPE;
+			} else if (c == '\"') {
+				state = LEX_NORMAL;
 			}
-			if (lw.type == FEXEC) {
-				lw.sidx = i;
-				lw.type = INWORD;
-				break;
-			}
-			if (lw.type == QUOAT || lw.type == SQUOAT)
-				break;
-			if (lw.type == PDIRECT)
-				lw.type = UNKNOWN;
-			if (lw.type == DOT)
-				lw.type = INWORD;
+			break;
+		case LEX_IN_SQUOTE:
+			if (c == '\'')
+				state = LEX_NORMAL;
+			break;
+		case LEX_ESCAPE:
+			state = prev_state;
 			break;
 		}
 	}
+	if (wflag == 0)
+		lw.sidx = i;
 	return (lw);
 }

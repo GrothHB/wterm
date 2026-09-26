@@ -14,6 +14,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "my_term.h"
+#include "tab.h"
 
 #define OPENBSD_MAX 76
 
@@ -46,15 +47,17 @@ fill_command(char *word, char *path)
 	struct dirent 		*dir_list;
 	struct stat 		btyp;
 	char 			**farray, **tmp, *t;
-	static char		ret[] = "NOTFOUND";
-	static char		retmulti[] = "MFOUND";
+	static char		ret[] = "NOTF";
+	static char		retmulti[] = "MF";
+	static char		not_disp[] = "TM";
 	size_t 			c_size, c_index, i, bsize, len, strsize;
-	size_t 			max_length;
+	size_t 			max_length, mflag;
 	int			fst;
 	char 			sbuf[OPENBSD_MAX + 32];
 	bsize = sizeof(sbuf);
-	c_index = max_length = 0;
+	c_index = max_length = mflag = 0;
 	c_size = 1;
+	strsize = strlen(word);
 	farray = malloc(sizeof(char*));
 
 	if ((ptr = opendir(path)) == NULL) {
@@ -66,7 +69,6 @@ fill_command(char *word, char *path)
 		if (word[0] != '.')
 			if (dir_list->d_name[0] == '.')
 				continue;
-		strsize = strlen(word);
 		if (strlen(dir_list->d_name) < strsize && strsize > 0)
 			continue;
 		if (strsize > 0)
@@ -111,9 +113,12 @@ fill_command(char *word, char *path)
 		free(farray);
 		return (fw);
 	}
-	if (c_index >= 50)
-		if (message(c_index))
+	if (c_index >= 50) {
+		if (message(c_index)) {
+			mflag = 1;
 			goto clean;
+		}
+	}
 	if (c_index == 0) {
 		free(farray);
 		closedir(ptr);
@@ -149,5 +154,7 @@ clean:
 		free(farray[i]);
 	closedir(ptr);
 	free(farray);
+	if (mflag)
+		return (not_disp);
 	return (NULL);
 }
