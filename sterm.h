@@ -2,7 +2,8 @@
 #define STERM_H
 
 enum rebuild {
-	INLINE,
+	INLINE_ADD,
+	INLINE_CANS,
 	HISTORY
 }; 
 
@@ -39,5 +40,6 @@ void 		burn_n_rebuild(struct cpkg *, enum rebuild, int);
 void 		find_fill(char, struct cpkg *);
 void		shift_n_fill(struct cpkg *, int , char *, struct word_t);
 char		*parse_dir(char *);
+void		init_ascii(void (**)(char, struct cpkg *));
 
 #endif /* STERM_H */

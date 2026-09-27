@@ -4,9 +4,11 @@
 #include <termios.h>
 #include <stdint.h>
 
+#define NO_ACTION 0x0F
+
 struct i_command {
-	int 		idx;
 	char 		*command;
+	int 		idx;
 };
 
 enum hflags {
@@ -16,18 +18,32 @@ enum hflags {
 	CLEAR
 };
 
+enum search_m {
+	CLOSE_FILL,
+	ADD_SPACE
+};
+
+enum vi_like_state {
+	VIL_INSERT,
+	VIL_EDIT,
+};
+
 struct cpkg {
 	void			(**tptr)(char, struct cpkg *);
-	struct i_command 	com;
+	char 			**history, **search_hist;
 	struct termios 		base;
-	char 			**history;
 	int 			curs;
+	struct i_command 	com;
 	enum hflags 		flag;
+	enum search_m		fill;
+	enum vi_like_state	vil_mode;
+	uint8_t			mode;
+	uint8_t			rvs_action;
 };
 
 struct word_t {
-	uint8_t 	type;
 	int 		sidx;
+	uint8_t 	type;
 };
 
 enum {
@@ -56,10 +72,9 @@ enum revs_state {
 };
 
 enum revs_lex {
-	REVS_LEX_NORMAL,
-	REVS_LEX_SEARCH,
-	REVS_LEX_GET,
-	REVS_LEX_DISPL,
-	REVS_LEX_WRONG
+	REVS_LEX_NORMAL = ' ',
+	REVS_LEX_SEARCH = 's',
+	REVS_LEX_TAKE = 't',
+	REVS_LEX_DISPL = 'l'
 };
 #endif
