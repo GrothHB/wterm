@@ -1,10 +1,20 @@
 #ifndef MY_TERM_H
 #define MY_TERM_H
 
+#include <stddef.h>
 #include <termios.h>
 #include <stdint.h>
 
 #define NO_ACTION 0x0F
+#define BS '\010' /* backspace */
+#define DEL '\177' 
+#define HT '\011' 
+#define LF '\012' /* new line */
+#define CR '\015' 
+#define ESC '\033'
+#define SPACE '\040'
+#define DC2 0x12
+
 
 struct i_command {
 	char 		*command;
@@ -23,22 +33,18 @@ enum search_m {
 	ADD_SPACE
 };
 
-enum vi_like_state {
-	VIL_INSERT,
-	VIL_EDIT,
-};
-
 struct cpkg {
 	void			(**tptr)(char, struct cpkg *);
-	char 			**history, **search_hist;
+	char 			**history, **word_search, *ps;
 	struct termios 		base;
 	int 			curs;
 	struct i_command 	com;
 	enum hflags 		flag;
 	enum search_m		fill;
-	enum vi_like_state	vil_mode;
+	size_t			hst_num;
 	uint8_t			mode;
 	uint8_t			rvs_action;
+	uint8_t			last_list_st;
 };
 
 struct word_t {
@@ -63,18 +69,4 @@ enum lex_state {
 	LEX_ESCAPE
 };
 
-enum revs_state {
-	REVS_SWORD,
-	REVS_SSTRING,
-	REVS_PUTC,
-	REVS_LISTC,
-	REVS_WORK
-};
-
-enum revs_lex {
-	REVS_LEX_NORMAL = ' ',
-	REVS_LEX_SEARCH = 's',
-	REVS_LEX_TAKE = 't',
-	REVS_LEX_DISPL = 'l'
-};
 #endif

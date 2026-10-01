@@ -1,28 +1,34 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include "my_term.h"
 #include "openbsd.h"
 #include "sterm.h"
-#include "revs.h"
+#include "test3.h"
+
+#define OPENBSD_MAX 77 /* style(9) 80 column max */
+#define MAX_SIZE_FOR_PRINT (MAX_CANON + (MAX_CANON / OPENBSD_MAX) * \
+			    2 + 24)
+#define WORD_SEARCH 0xF
 
 char **
-search_word(char **hist, char *lw, size_t *nf, size_t *mxl)
+search_word(char **hist, char *lw, size_t *nf)
 {
 	char		**sh, **tmp;
-	size_t		c_idx, c_size, max_len, wsize, lw_size;
+	size_t		c_idx, c_size;
 	int		i;
 
-	c_idx = max_len = 0;
+	c_idx = 0;
 	c_size = 16;
-	lw_size = strlen(lw);
-	if ((sh = malloc(c_size * sizeof(char *))) == NULL)
+	if ((sh = malloc((c_size + 1)* sizeof(char *))) == NULL)
 		return (NULL);
 	for (i = 0; hist[i] != NULL; ++i) {
-		if (strstr(hist[i], lw) == NULL && lw_size > 0) {
+		if (strstr(hist[i], lw) == NULL) {
 			continue;
 		}
-		wsize = strlen(hist[i]);
 		if (c_idx == c_size) {
 			c_size *= 2;
 			tmp = reallocarray(sh, c_size, sizeof(char *));
@@ -33,208 +39,212 @@ search_word(char **hist, char *lw, size_t *nf, size_t *mxl)
 			sh = tmp;
 		}
 		sh[c_idx++] = hist[i];
-		max_len = (wsize > max_len) ? wsize: max_len;
+		sh[c_idx] = NULL;
 	}
 	*nf = c_idx;
-	*mxl = max_len;
+	if (c_idx == 0) {
+		free(sh);
+		sh = NULL;
+	}
 	return (sh);
 }
 
 void
 set_rvs_mode(char c, struct cpkg *pk)
 {
+	static char 		*ptr_ps;
+	static const char	rvs_ps[] = "@ ";
 	(void)c;
 	pk->mode ^= 0x1;
-	if (pk->revs_action == NO_ACTION) {
-		pk->revs_action = 0;
+	if (pk->rvs_action == NO_ACTION) {
+		pk->rvs_action = 0;
 		return;
 	}
 	if (pk->mode) {
-		uint8_t		i;
-		for (i = 0; i < 128; ++i) {
-			if (pk->tptr[i] == disp_stream)
-				pk->tptr[i] = rvs_fst_disp_pars;
-		}
-		pk->tptr[LF] = list_hist;
-		pk->tptr[HT] = neutral;
-		pk->tptr[REVS_LEX_SEARCH] = set_search;
-		pk->tptr[REVS_LEX_TAKE] = take_command;
-		pk->tptr[REVS_LEX_DISP] = list_hist;
+		pk->tptr[LF] = rvs_search_mode;
+		ptr_ps = pk->ps;
+		pk->ps = rvs_ps;
 	} else {
-		init_ascii(pk->tptr);
+		pk->tptr[LF] = clear_comm;
+		pk->ps = ptr_ps;
 	}
 }
 
 void
-rvs_fst_disp_pars(char c, struct cpkg *pk)
+set_vil_mode(void (**ascii)(char, struct cpkg *))
 {
-	disp_stream(c, pk);
-	pk->rvs_action = NO_ACTION;
-	init_ascii(pk->tptr);
-	pk->tptr[LF] = serv_wrong_exit;
-	pk->tptr[DEL] = rvs_wex_delete;
+	(void)**ascii;
 }
 
 void
-rvs_wex_delete(char c, struct cpkg *pk)
+take_command(int c, struct cpkg *pk)
 {
-	int		i;
-	cans(c, pk);
-	if (pk->com.idx == 0) {
-		set_rvs_mode(c, pk);
+	(void)c;
+	(void)*pk;
+}
+void
+rvs_search_mode(char c, struct cpkg *pk)
+{
+	int 			i, old_curs;
+	char			*endptr;
+	static int rest_comm = 0;
+	(void)c;
+	old_curs = pk->curs;
+	if (pk->com.idx == 0 && rest_comm == 0) {
+		if (pk->word_search == NULL)
+			pk->word_search = pk->history;
+		list_commands(0, pk, &rest_comm);
+		if (pk->last_list_st == WORD_SEARCH && rest_comm == 0) {
+			free(pk->word_search);
+			pk->word_search = NULL;
+		}
 		return;
 	}
-	for (i = pk->curs; i >= 0; --i) {
+	for (i = 0; i < pk->com.idx; ++i) {
 		if (pk->com.command[i] != ' ')
 			break;
 	}
-	if (i != 0)
-		return;
-	set_rvs_mode(c, pk);
-}
-
-void
-set_search(char c, struct cpkg *pk)
-{
-	disp_stream(c, pk);
-	init_search(pk->tptr);
-	pk->mode = 1;
-}
-
-void
-init_search(void (**ascii)(char, struct cpkg *))
-{
-	uint8_t		i;
-	for (i = 0; i < (uint8_t)128; ++i) {
-		if (ascii[i] == rvs_fst_disp_pars)
-			ascii[i] = rvs_fst_search_mode;
-		else if (i == (uint8_t)LF)
-			ascii[i] = init_single_search;
-		else if (i == (uint8_t)DEL)
-			ascii[i] = watch_input_search_bgn;
-		else if (i == (unit8_t)ESC)
-			ascii[i] = movm_search;
-	}
-}
-
-void
-watch_input_search_bgn(char c, struct cpkg *pk)
-{
-	int		i;
-	cans(c, pk);
-	if (pk->curs > 0 && pk->com.command[pk->curs - 1] == 's') {
-		init_search(pk->tptr);
+	if (i == pk->com.idx) {
 		return;
 	}
-	pk->mode = 0;
-	set_rvs_mode(c, pk);
-}
-
-void
-movm_search(char c, struct cpkg *pk)
-{
-	int old_curs = pk->curs;
-	spec(c, pk);
-	if (old_curs < pk->curs) {
-		if (pk->com.command[pk->curs] == ' ') {
-			if (searched_words == 0) {
-				pk->tptr[DEL] = watch_btw_wrds;
-				pk->tptr[ESC] = movm_btw_search;
-			}
-		}
-		return;
-	} else {
-		uint8_t 	i;
-		if (pk->com.command[pk->curs] == 's')
+	switch (pk->com.command[i]) {
+	case 's':
+		if (pk->com.command[i + 1] != ' ')
+			break;
+		rvs_search(i + 2, pk);
+		if (pk->hst_num  == 0)
+			break;
+		list_commands(0, pk, &rest_comm);
+		if (rest_comm > 0) {
+			pk->last_list_st = WORD_SEARCH;
 			return;
-		for (i = 0; i < (uint8_t)128; ++i) {
-			if (ascii[i] == rvs_fst_search_mode)
-				ascii[i] = rvs_bf_search;
-			else if (ascii[i] == movm_search)
-				ascii[i] = movm_bf_search;
-			else if (ascii[i] == watch_input_search_bgn)
-				ascii[i] = cans;
 		}
+		free(pk->word_search);
+		pk->word_search = NULL;
+		break;
+	case 't':
+		take_command(i, pk);
+		break;
+	case 'l':
+		if (pk->com.command[i + 1] != ' ')
+			break;
+		i = strtol(&pk->com.command[i + 2], &endptr, 0);
+		if (*endptr != '\0' || i < 0)
+			break;
+		if (*endptr != pk->com.command[i + 2])
+			break;
+		pk->word_search = pk->history;
+		list_commands(i, pk, &rest_comm);
+		if (rest_comm > 0)
+			return;
+		break;
 	}
+	pk->com.command[0] = '\0';
+	pk->com.idx = 0;
+	pk->curs = 0;
+	if (pk->word_search != NULL)
+		pk->word_search = NULL;
+	burn_n_rebuild(pk, HISTORY, old_curs);
 }
 
-
-/*
 void
-change_clear_comm(char c, struct cpkg *pk)
+list_commands(int base, struct cpkg *pk, int *cmdlf)
 {
-	unsigned int		i, num, wfs_idx, wfs_size;
-	uint8_t			wfs_flag;
-	enum revs_lex		lexs;
-	enum revs_state		state;
-	char			c, **wfs;
-	lexs = NORMALL;
-	wfs_size = 4;
-	wfs_idx = 0;
-	if ((wfs = malloc(sizeof(char *) * wfs_size)) == NULL) {
-		wfs_flag = 0;
-	} else {
-		wfs_flag = 1;
-		wfs[wfs_idx] = NULL;
+	char			buf[MAX_SIZE_FOR_PRINT];
+	size_t			bsize;
+	int 			lines_printed, num, i;
+	size_t 			len;
+	static int inter = 1;
+	bsize = sizeof(buf);
+	lines_printed = i = len = 0;
+	if (base) {
+		if (base > (int)pk->hst_num - 2)
+			return;
+		inter = base;
 	}
-	for (i = 0; i < pk->com.idx; ++i) {
-		c = pk->com.command[i];
-		switch (lexs) {
-		case NORMALL:
-			switch (c) {
-			case 's':
-				lexs = SEARCH;
-				break;
-			case 'g':
-				lexs = GET;
-				break;
-			case 'l':
-				lexs = DISPL;
-				break;
-			case ' ':
-				break;
-			default:
-				goto clean;
+	while ((i = (int)(pk->hst_num - inter)) >= 0) {
+		int 		idx;
+		int hidx = 0;
+		if (lines_printed == 2)
+			break;
+		size_t wsize = strlen(pk->word_search[i]);
+		len += snprintf(&buf[len], bsize - len, "\n\r%d", inter);
+		buf[len++] = ':';
+		for (idx = 0; idx < (int)wsize; ++idx) {
+			if (idx > 0 && idx % OPENBSD_MAX == 0) {
+				buf[len++] = '\n';
+				buf[len++] = '\r';
 			}
-			break;
-		case DISPL:
-			if (c != ' ')
-				goto clean;
-			state = LISTC;
-			lexs = WORK;
-			break;
-		case GET:
-			if (c != ' ')
-				goto clean;
-			state = PUTC;
-			lexs = WORK;
-			break;
-		case SEARCH:
-			if (c == 's')
-				state = SSTRING;
-			else if (c == ' ')
-				state = SWORD;
-			else
-				goto clean;
-			lexs = WORK;
-			break;
-		case WORK:
-			switch (state) {
-			case SWORD:
-				if (!wfs_flag)
-					return;
-				switch (c) {
-				case ' ':
-					break;
-	clean:
-	if (wfs_flag) {
-		if (wfs_idx > 0) {
-			char **tmp = wfs;
-			while (*tmp != NULL)
-				free(*tmp++);
+			buf[len++] = pk->word_search[i][hidx++];
 		}
-		free(wfs);
+		buf[len] = '\0';
+		inter++;
+		++lines_printed;
 	}
-	return;
+	len += snprintf(&buf[len], bsize - len, "\n\r");
+	write(STDOUT_FILENO, buf, len + 1);
+	num = pk->hst_num - inter;
+	if (num > 0) {
+		char msg[50];
+		*cmdlf = num;
+		len = snprintf(msg, 50, "there are %d commands left\n\r", num);
+		write(STDOUT_FILENO, msg, len);
+		return;
+	}
+	inter = 1;
+	*cmdlf = 0;
+	pk->com.command[0] = '\0';
+	pk->com.idx = 0;
+	pk->curs = 0;
+	burn_n_rebuild(pk, HISTORY, 0);
 }
-*/
+
+void
+rvs_search(int base, struct cpkg *pk)
+{
+	char			word[MAX_CANON];
+	char			**tmp;
+	int i = 0;
+	uint8_t state = 0;
+	uint8_t hflag = 0;
+	word[0] = '\0';
+	while (base < pk->com.idx) {
+		if (pk->com.command[base] == ' ' && state) {
+			if (pk->word_search == NULL) {
+				pk->word_search = pk->history;
+				hflag = 1;
+			}
+			tmp = search_word(pk->word_search, word,
+					  &pk->hst_num);
+			if (!hflag) {
+				free(pk->word_search);
+				if (pk->hst_num == 0) {
+					pk->word_search = NULL;
+					return;
+				}
+			}
+			pk->word_search = tmp;
+			state = 0;
+			i = 0;
+		} else {
+			word[i++] = pk->com.command[base++];
+			word[i] = '\0';
+			state = 1;
+		}
+	}
+	if (base > 0 && pk->com.command[base - 1] != ' ') {
+		if (pk->word_search == NULL) {
+			pk->word_search = pk->history;
+			hflag = 1;
+		}
+		tmp = search_word(pk->word_search, word, &pk->hst_num);
+		if (pk->hst_num == 0 && !hflag) {
+			free(pk->word_search);
+			pk->word_search = NULL;
+			return;
+		}
+		if (!hflag)
+			free(pk->word_search);
+		pk->word_search= tmp;
+	}
+}

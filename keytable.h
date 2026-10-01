@@ -3,14 +3,7 @@
 
 #include "my_term.h"
 #include "sterm.h"
-
-#define BS '\010' /* backspace */
-#define DEL '\177' 
-#define HT '\011' 
-#define LF '\012' /* new line */
-#define CR '\015' 
-#define ESC '\033'
-#define SPACE '\040'
+#include "test3.h"
 
 void
 init_ascii(void (*ascii[])(char, struct cpkg *))
@@ -35,6 +28,7 @@ init_ascii(void (*ascii[])(char, struct cpkg *))
 	for (; i < DEL; ++i)
 		ascii[i] = disp_stream;
 	ascii[i] = cans;
+	ascii[DC2] = set_rvs_mode;
 	
 }
 #endif

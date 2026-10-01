@@ -16,7 +16,8 @@
 #include "my_term.h"
 #include "tab.h"
 
-#define OPENBSD_MAX 76
+#define OPENBSD_MAX 77
+#define PIECE_OF_MEM 2048
 
 int
 message(int nf)
@@ -41,21 +42,21 @@ fcompare(const void* x, const void* y)
 }
 
 char *
-fill_command(char *word, char *path)
+fill_command(char *word, char *path, enum search_m *fflag)
 {
 	DIR* 			ptr;
 	struct dirent 		*dir_list;
 	struct stat 		btyp;
-	char 			**farray, **tmp, *t;
+	char 			**farray, **tmp, *t, *base, *fw;
 	static char		ret[] = "NOTF";
 	static char		retmulti[] = "MF";
 	static char		not_disp[] = "TM";
-	size_t 			c_size, c_index, i, bsize, len, strsize;
-	size_t 			max_length, mflag;
+	size_t 			c_size, c_index, i, bsize, len, strsize, chinl;
+	size_t 			max_length, mflag, inter_idx, inter_size, last;
 	int			fst;
-	char 			sbuf[OPENBSD_MAX + 32];
+	char 			sbuf[PIECE_OF_MEM];
 	bsize = sizeof(sbuf);
-	c_index = max_length = mflag = 0;
+	c_index = max_length = mflag = inter_idx = 0;
 	c_size = 1;
 	strsize = strlen(word);
 	farray = malloc(sizeof(char*));
@@ -107,11 +108,35 @@ fill_command(char *word, char *path)
 	}
 
 	qsort(farray, c_index, sizeof(char*), fcompare);
+	if (c_index == 0) {
+		free(farray);
+		closedir(ptr);
+		return (ret);
+	}
 	if (c_index == 1) {
-		char *fw = farray[0];
+		fw = farray[0];
 		closedir(ptr);
 		free(farray);
 		return (fw);
+	}
+	base = &farray[0][strsize];
+	last = c_index - 1;
+	inter_size = strlen(farray[0]);
+	for (inter_idx = 0; inter_idx < (max_length - strsize); ++inter_idx) {
+		size_t check_size = strsize + inter_idx;
+		if (farray[last][check_size] ^ *base)
+			break;
+		if (check_size <= inter_size)
+			base++; 
+	}
+	if (inter_idx) {
+		fw = strdup(farray[0]);
+		if (fw == NULL)
+			inter_idx = 0;
+		if (strlen(fw) + 1 > strsize + inter_idx)
+			fw[strsize + inter_idx] = '\0';
+		*fflag = CLOSE_FILL;
+		goto clean;
 	}
 	if (c_index >= 50) {
 		if (message(c_index)) {
@@ -119,25 +144,57 @@ fill_command(char *word, char *path)
 			goto clean;
 		}
 	}
-	if (c_index == 0) {
-		free(farray);
-		closedir(ptr);
-		return (ret);
-	}
 	write(STDOUT_FILENO, "\n\r", 2);
-	len = 0;
+	len = chinl = 0;
+	if (max_length > OPENBSD_MAX)
+		max_length = OPENBSD_MAX;
 	for (i = 0; i < c_index; ++i) {
-		if (max_length + 1 + len > bsize) {
+		size_t		condp, nr;
+		size_t fwl = strlen(farray[i]);
+		condp = (fwl > max_length)? fwl: max_length;
+		if (condp + 3 + len > bsize) {
 			write(STDOUT_FILENO, sbuf, len);
 			len = 0;
+			chinl = 0;
 		}
-		if (max_length + 1 + len > OPENBSD_MAX) {
+		if (fwl > OPENBSD_MAX) {
+			size_t chg = 0;
+			if (chinl > 0) {
+				len += snprintf(&sbuf[len], bsize - len,
+						"\n\r");
+				chinl = 0;
+			}
+			while (chg < fwl) {
+				int chunk = ((fwl - chg) > OPENBSD_MAX)?
+						OPENBSD_MAX: fwl - chg;
+				if (len + chunk + 3 > bsize) {
+					write(STDOUT_FILENO, sbuf, len);
+					len = 0;
+				}
+				nr = snprintf(&sbuf[len], bsize - len, 
+					      "%.*s\n\r", chunk,
+					      &farray[i][chg]);
+				chg += chunk;
+				len += nr;
+					
+			}
+			write(STDOUT_FILENO, sbuf, len);
+			len = 0;
+			chinl = 0;
+			free(farray[i]);
+			farray[i] = NULL;
+			continue;
+		}
+		if (chinl + 2 + fwl > OPENBSD_MAX) {
 			len += snprintf(&sbuf[len], bsize - len, "\n\r");
 			write(STDOUT_FILENO, sbuf, len);
 			len = 0;
+			chinl = 0;
 		}
-		len += snprintf(&sbuf[len], bsize - len, "%-*s  ", 
+		nr = snprintf(&sbuf[len], bsize - len, "%-*s  ", 
 				(int)max_length, farray[i]);
+		chinl += nr;
+		len += nr;
 		free(farray[i]);
 		farray[i] = NULL;
 	}
@@ -154,6 +211,8 @@ clean:
 		free(farray[i]);
 	closedir(ptr);
 	free(farray);
+	if (inter_idx)
+		return (fw);
 	if (mflag)
 		return (not_disp);
 	return (NULL);
