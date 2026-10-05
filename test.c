@@ -24,7 +24,7 @@ message(int nf)
 {
 	char buffer[50], c;
 	int len = snprintf(buffer, sizeof(buffer), "\r\033[K"
-			   "Finded %d posibilites. Display [Y/n]", nf);
+			   "Found %d posibilites. Display [Y/n]", nf);
 	write(STDOUT_FILENO, buffer, len);
 	while (read(STDIN_FILENO, &c, 1)) {
 		if (c == 'Y')
