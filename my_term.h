@@ -1,8 +1,8 @@
 #ifndef MY_TERM_H
 #define MY_TERM_H
 
-#include <stddef.h>
 #include <termios.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define NO_ACTION 0x0F
@@ -19,6 +19,7 @@
 struct i_command {
 	char 		*command;
 	int 		idx;
+	uint32_t	max_hst_num;
 };
 
 enum hflags {
@@ -43,8 +44,8 @@ struct cpkg {
 	enum search_m		fill;
 	size_t			hst_num;
 	uint8_t			mode;
-	uint8_t			rvs_action;
-	uint8_t			last_list_st;
+	uint8_t			screen_limit;
+	uint8_t			rvs_search_hst_max_prt;
 };
 
 struct word_t {
@@ -69,4 +70,17 @@ enum lex_state {
 	LEX_ESCAPE
 };
 
+enum lex_paging {
+	LEX_HANDLING_SPACE,
+	LEX_HANDLING_BACK,
+	LEX_COMMANDS,
+	LEX_SPEC_COMM,
+	LEX_CLEAR
+};
+
+#ifndef _CFMAKERAW_DECLARED
+#define _CFMAKERAW_DECLARED
+struct termios;
+extern void cfmakeraw(struct termios *termios_p);
+#endif
 #endif

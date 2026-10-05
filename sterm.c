@@ -8,12 +8,14 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <termios.h>
 #include <string.h>
 #include <limits.h>
 #include <fcntl.h>
+#include <termios.h>
 #include <stdarg.h>
-#include <time.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/ioctl.h>
 #include "keytable.h"
 #include "tab.h"
 #include "my_term.h"
@@ -22,41 +24,53 @@
 #define ESC '\033'
 #define DEL '\177'
 #define NEWLINE '\n'
-#define OPENBSD_MAX 77 /* style(9) 80 column max */
+#define OPENBSD_MAX 80 /* style(9) 80 column max */
 #define HISTORY_MAX_SIZE 250 
-#define MAX_Y ((MAX_CANON / OPENBSD_MAX) * OPENBSD_MAX)
-#define PS2_SIZE 4
-#define BURN_N_REBUILD_MAX (MAX_CANON + ((MAX_CANON) / OPENBSD_MAX) * 5 + 32)
-#define DONT_BREAK 0x1
-#define BREAK 0x2
-#define CANS 0xFF
+#define PS2_SIZE 1
+#define BURN_N_REBUILD_MAX \
+(MAX_CANON + ((MAX_CANON) / (OPENBSD_MAX - 65) * 5 + 32))
+#define WAIT_FOR_SPEC 25
 
+static volatile sig_atomic_t term_sig = 0;
 int
 main(void)
 {
 	struct termios 		raw;
 	struct cpkg 		header;
+	struct pollfd		fds[1];
+	struct sigaction	sa;
 	char 			command[MAX_CANON + 1];
-	char			ps[] = "$ ";
 	unsigned char 		c;
-	char 			*command_history[HISTORY_MAX_SIZE + 1];
+	char 			*command_history[HISTORY_MAX_SIZE + 1], *ptr;
 	void 			(*ascii[128])(char c, struct cpkg *);
+	char			ps[] = "$ ";
+	size_t			ps_size;
+	nfds_t fds_num = 1;
+	sa.sa_handler = handle_term_inter;
+	sa.sa_flags = 0;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGWINCH, &sa, NULL);
+	fds[0].fd = STDIN_FILENO;
+	fds[0].events |= POLLIN;
 	/* ascii array is declared in `keytable.h' */
 	init_ascii(ascii);
+#ifndef __AFL_COMPILER
 	tcgetattr(STDIN_FILENO, &header.base);
+#endif
 	header.curs = 0;
 	header.com.idx = 0;
+	header.com.max_hst_num = 0;
 	header.hst_num = 0;
 	header.com.command = command;
 	header.history = command_history;
+	header.rvs_search_hst_max_prt = 10;
 	header.flag = SAVE;
 	header.fill = ADD_SPACE;
 	header.tptr = ascii;
 	header.word_search = NULL;
-	header.last_list_st = 0;
 	header.mode = 0;
-	header.ps = ps;
 	command_history[0] = NULL;
+#ifndef __AFL_COMPILER
 	raw = header.base; 
 	cfmakeraw(&raw);
 	/* Setting enter to FL becouse in raw mode
@@ -64,16 +78,43 @@ main(void)
 	 */
 	raw.c_iflag |= ICRNL;
 	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-	write(STDOUT_FILENO, ps, 2);
+#endif
+	if ((ptr = getenv("PS1")) == NULL) {
+		header.ps = ps;
+	} else {
+		ps_size = strlen(ptr);
+		if ((header.ps = malloc(ps_size + 3)) == NULL) {
+			header.ps = ps;
+		} else {
+			strlcpy(header.ps, ptr, ps_size + 1);
+			header.ps[ps_size++] = '$';
+			header.ps[ps_size++] = ' ';
+			header.ps[ps_size] = '\0';
+		}
+	}
+	set_screen_limit(&header);
 
-	while (read(STDIN_FILENO, &c, 1)) {
-		if (c & (1 << 7))
-			continue;
-		ascii[c](c, &header);
+	write(STDOUT_FILENO, header.ps, strlen(header.ps));
+
+	while (1) {
+		if (term_sig == 1) {
+			set_screen_limit(&header);
+			term_sig = 0;
+		}
+		if (poll(fds, fds_num, -1) > 0) {
+			if (fds[0].revents & POLLIN) {
+				read(STDIN_FILENO, &c, 1);
+				if (c & (1 << 7))
+					continue;
+				ascii[c](c, &header);
+			}
+		}
 	}
 
 	clear_mem(&header);
+#ifndef __AFL_COMPILER
 	tcsetattr(STDIN_FILENO, TCSANOW, &header.base);
+#endif
 	return (0);
 }
 
@@ -108,6 +149,7 @@ hcntl(struct cpkg *pk)
 	case CLEAR:
 		rbp = rsp;
 		pk->hst_num = rsp;
+		pk->com.max_hst_num = rsp;
 		break;
 	default:
 		break;
@@ -135,24 +177,31 @@ disp_stream(char c, struct cpkg *pk)
 		cursor_cntl(M_RIGHT, pk);
 	}
 }
+
 void
 spec(char c, struct cpkg *pk)
 {
-	struct timespec timeout, inttime;
-	char 		sc[2];
+	char 			sc[2];
+	struct pollfd		fds;
+	nfds_t nfds = 1;
+	fds.fd = STDIN_FILENO;
+	fds.events = POLLIN;
+	/*struct timespec timeout, inttime;
 	int flag = fcntl(0, F_GETFL);
-	(void)c;
 	fcntl(0, F_SETFL, flag | O_NONBLOCK);
 	timeout.tv_sec = 0;
 	timeout.tv_nsec = 25000000;
-	nanosleep(&timeout, &inttime);
+	nanosleep(&timeout, &inttime); */
+	
+	(void)c;
 
-	if (read(STDIN_FILENO, &sc, 2) == -1) {
-		fcntl(0, F_SETFL, flag);
+	if (poll(&fds, nfds, WAIT_FOR_SPEC) <= 0) {
+		/*fcntl(0, F_SETFL, flag);*/
 		if (pk->tptr['x'] == disp_stream)
 			set_vil_mode(pk->tptr);
 	} else {
-		fcntl(0, F_SETFL, flag);
+		/*fcntl(0, F_SETFL, flag);*/
+		read(STDIN_FILENO, &sc, 2);
 		if (sc[0] == '[')
 			parse_esc_com(sc[1], pk);
 	}
@@ -250,9 +299,10 @@ cursor_cntl(enum cursmov action, struct cpkg *pk)
 		break;
 	case QL:
 		if (pk->curs > 0) {
-			if (pk->curs % OPENBSD_MAX == 0 && pk->curs > 0) {
+			if (pk->curs % pk->screen_limit == 0 &&
+			    pk->curs > 0) {
 				write(STDOUT_FILENO, "\033[A", 3);
-				set_cursor(--pk->curs, pk->ps);
+				set_cursor(--pk->curs, pk);
 				break;
 			}
 			--pk->curs;
@@ -263,9 +313,9 @@ cursor_cntl(enum cursmov action, struct cpkg *pk)
 		if (pk->curs == pk->com.idx)
 			break;
 		++pk->curs;
-		if (pk->curs % OPENBSD_MAX == 0 && pk->curs > 0) {
+		if (pk->curs % pk->screen_limit == 0 && pk->curs > 0) {
 			write(STDOUT_FILENO, "\033[B", 3);
-			set_cursor(pk->curs, pk->ps);
+			set_cursor(pk->curs, pk);
 			break;
 		}
 		write(STDOUT_FILENO, "\033[C", 3);
@@ -296,7 +346,7 @@ assigne(char c, struct cpkg *pk)
 	pk->com.command[pk->com.idx]  = c;
 	pk->com.command[pk->com.idx + 1] = '\0';
 	write(STDOUT_FILENO, &c, 1);
-	if (pk->com.idx > 0 && (pk->com.idx + 1) % OPENBSD_MAX == 0)
+	if (pk->com.idx > 0 && (pk->com.idx + 1) % pk->screen_limit == 0)
 		break_line(pk);
 }
 
@@ -340,12 +390,12 @@ push_command(int rbp, struct cpkg *pk)
 }
 
 void
-set_cursor(int position, char *PS1)
+set_cursor(int position, struct cpkg *pk)
 {
-	char 		max_mov[7];
+	char 		max_mov[16];
 	int 		len;
-	position %= OPENBSD_MAX;
-	position += strlen(PS1);
+	position %= pk->screen_limit;
+	position += strlen(pk->ps);
 	len = snprintf(max_mov, sizeof(max_mov), "\r\033[%dC", position);
 	write(STDOUT_FILENO, max_mov, len);
 }
@@ -361,8 +411,8 @@ clear_comm(char c, struct cpkg *pk)
 	hcntl(pk);
 	pk->flag = CLEAR;
 	hcntl(pk);
-	linep = (pk->com.idx > 0) ? ((pk->com.idx - 1) / OPENBSD_MAX): 0; 
-	slide = linep - (pk->curs / OPENBSD_MAX);
+	linep = (pk->com.idx > 0) ? ((pk->com.idx - 1) / pk->screen_limit): 0;
+	slide = linep - (pk->curs / pk->screen_limit);
 	if (slide) {
 		len = snprintf(buf, sizeof(buf), "\033[%dB\n\r", slide);
 		pssize = strlen(pk->ps);
@@ -384,7 +434,7 @@ clear_page(struct cpkg *pk)
 	const char 	clean[] = "\033[K";
 	int 		iter, times;
 	int len_er_one_up = strlen(erease_one_up);
-	times = pk->com.idx / OPENBSD_MAX;
+	times = pk->com.idx / pk->screen_limit;
 	for (iter = 0; iter < times; ++iter)
 		write(STDOUT_FILENO, erease_one_up, len_er_one_up);
 	write(STDOUT_FILENO, clean, 3);
@@ -395,7 +445,7 @@ break_line(struct cpkg *pk)
 {
 	char 		buf[20];
 	size_t		len;
-	len = snprintf(buf, sizeof(p2), "\n\r>%-*s", strlen(pk->ps) - 1, "");
+	len = snprintf(buf, sizeof(buf), "\n\r>%-*s", (int)strlen(pk->ps) - 1, "");
 	write(STDOUT_FILENO, buf, len);
 }
 
@@ -405,53 +455,54 @@ burn_n_rebuild(struct cpkg *pk, enum rebuild state, int old_curs)
 	char 		buffer[BURN_N_REBUILD_MAX];
 	size_t 		len, bsize, pssize;
 	int 		y, iter, cl;
-	cl = y = 0;
+	cl = y = len = 0;
 	bsize = sizeof(buffer);
 	if (state == INLINE_CANS) {
 		int 	linep;
-		y = pk->curs / OPENBSD_MAX;
-		linep = (pk->com.idx - 1) / OPENBSD_MAX;
+		y = pk->curs / pk->screen_limit;
+		linep = (pk->com.idx - 1) / pk->screen_limit;
 		linep = (pk->com.idx > 0) ? linep: 0;
 		cl = linep - y;
-		if ((pk->curs + 1) % OPENBSD_MAX == 0 && pk->curs > 0)
+		if ((pk->curs + 1) % pk->screen_limit == 0 && pk->curs > 0)
 			++y;
 		cl = (cl > 0) ? cl: 0;
-	} else if (state == INLINE_ADD) {
+	} else if (state == INLINE_ADD || state == TERM_RB) {
 		int 	linep;
-		y = pk->curs / OPENBSD_MAX;
-		linep = (pk->com.idx - 1) / OPENBSD_MAX;
+		y = pk->curs / pk->screen_limit;
+		linep = (pk->com.idx - 1) / pk->screen_limit;
 		linep = (pk->com.idx > 0) ? linep: 0;
 		cl = linep - y;
 		cl = (cl > 0) ? cl: 0;
 	} else if (state == HISTORY) {
-		y = old_curs / OPENBSD_MAX;
+		y = old_curs / pk->screen_limit;
 		cl = 0;
 	}
-	if (y)
+	if (y && state != TERM_RB)
 		len = snprintf(buffer, bsize, "\033[%dA\r\033[J", y);
-	else
+	else if (state != TERM_RB)
 		len = snprintf(buffer, bsize, "\r\033[J");
 	pssize = strlen(pk->ps);
 	strlcpy(&buffer[len], pk->ps, pssize + 1);
 	len += pssize;
 	for (iter = 0; iter < pk->com.idx; ++iter) {
-		if (iter % OPENBSD_MAX == 0 && iter > 0) {
+		if (iter % pk->screen_limit == 0 && iter > 0) {
 			int 		it;
 			buffer[len++] = '\n';
 			buffer[len++] = '\r';
 			buffer[len++] = '>';
-			for (it = 0; it < (int)strlen(pk->ps); ++it)
+			for (it = 0; it < (int)strlen(pk->ps) - 1; ++it)
 				buffer[len++] = ' ';
 		}
 		buffer[len++] = pk->com.command[iter];
 	}
 	if (cl > 0)
 		len += snprintf(&buffer[len], bsize - len, "\033[%dA", cl);
-	if (pk->com.idx > 0 && pk->curs % OPENBSD_MAX == 0 &&
+	if (pk->com.idx > 0 && pk->curs % pk->screen_limit == 0 &&
 	    pk->curs == pk->com.idx)
-		len += snprintf(&buffer[len], bsize - len, "\n\r>  ");
+		len += snprintf(&buffer[len], bsize - len, "\n\r>%-*s",
+				(int)strlen(pk->ps) - 1, "");
 	write(STDOUT_FILENO, buffer, len);
-	set_cursor(pk->curs, pk->ps);
+	set_cursor(pk->curs, pk);
 }
 
 void
@@ -607,7 +658,7 @@ shift_n_fill(struct cpkg *pk, int sofw, char *dummy, struct word_t sword)
 	char		*dst, *src;
 	size_t		size, len;
 	fwh = 1;
-	if (strcmp(dummy, "NOTF") == 0 || dummy == NULL)
+	if (dummy == NULL || strcmp(dummy, "NOTF") == 0)
 		return;
 	if (pk->curs != pk->com.idx || sword.type == DIRECT ||
 		pk->fill == CLOSE_FILL) {
@@ -686,4 +737,100 @@ parse_dir(char *form)
 		break;
 	}
 	return (message);
+}
+
+void
+set_screen_limit(struct cpkg *pk)
+{
+	struct winsize			term_size;
+	static uint8_t last_screen_limit = 0;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &term_size) == -1)
+		return;
+	if (pk->com.idx == 0) {
+		if (term_size.ws_col >= OPENBSD_MAX)
+			pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
+		else
+			pk->screen_limit = term_size.ws_col - strlen(pk->ps);
+		last_screen_limit = pk->screen_limit;
+		return;
+	}
+	if (term_size.ws_col >= OPENBSD_MAX) {
+		if (last_screen_limit == 0) {
+			pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
+			last_screen_limit = pk->screen_limit;
+			return;
+		}
+		if (last_screen_limit < OPENBSD_MAX) {
+			char			buf[20];
+			size_t			bsize;
+			uint8_t 		nol;
+			pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
+			nol = (pk->curs / last_screen_limit);
+			if (nol <= 0) {
+				last_screen_limit = pk->screen_limit;
+				burn_n_rebuild(pk, INLINE_ADD, 0);
+				return;
+			}
+			bsize = snprintf(buf, sizeof(buf), "\033[%dA\r\033[J",
+					 (int)nol);
+			write(STDOUT_FILENO, buf, bsize);
+			burn_n_rebuild(pk, TERM_RB, 0);
+			last_screen_limit = pk->screen_limit;
+			return;
+		}
+	}
+	if (term_size.ws_col < OPENBSD_MAX) {
+		pk->screen_limit = term_size.ws_col - strlen(pk->ps);
+		if (last_screen_limit > pk->screen_limit) {
+			char			buf[20];
+			size_t			bsize, i, nol;
+			nol = 0;
+			for (i = 0; (int)i <= pk->curs; ++i) {
+				size_t		cond1, cond2;
+				cond1 = i % last_screen_limit;
+				cond2 = i % pk->screen_limit;
+				if (i > 0 && cond1 == 0)
+					nol++;
+				if (i > 0 && cond2 == 0 && (int)i < pk->curs)
+					nol++;
+				if (cond1 == 0 && cond2 == 0 && i > 0)
+					nol--;
+			}
+			if (nol <= 0) {
+				last_screen_limit = pk->screen_limit;
+				burn_n_rebuild(pk, INLINE_ADD, 0);
+				return;
+			}
+			bsize = snprintf(buf, sizeof(buf), "\033[%dA\r\033[J",
+					 (int)nol);
+			write(STDOUT_FILENO, buf, bsize);
+			burn_n_rebuild(pk, TERM_RB, 0);
+			last_screen_limit = pk->screen_limit;
+			return;
+		} else if (last_screen_limit < pk->screen_limit) {
+			char			buf[20];
+			size_t			bsize;
+			uint8_t 		nol;
+			nol = (pk->curs / last_screen_limit);
+			if (nol <= 0) {
+				last_screen_limit = pk->screen_limit;
+				burn_n_rebuild(pk, INLINE_ADD, 0);
+				return;
+			}
+			bsize = snprintf(buf, sizeof(buf), "\033[%dA\r\033[J",
+					 (int)nol);
+			write(STDOUT_FILENO, buf, bsize);
+			burn_n_rebuild(pk, TERM_RB, 0);
+			last_screen_limit = pk->screen_limit;
+			return;
+		}
+	}
+	last_screen_limit = pk->screen_limit;
+}
+
+void
+handle_term_inter(int c)
+{
+	(void)c;
+	term_sig = 1;
 }
