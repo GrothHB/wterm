@@ -32,7 +32,7 @@ search_word(char **hist, char *lw, size_t *nf)
 		if (strstr(hist[i], lw) == NULL) {
 			continue;
 		}
-		if (c_idx == c_size) {
+		if (c_idx == c_size - 1) {
 			c_size *= 2;
 			tmp = reallocarray(sh, c_size, sizeof(char *));
 			if (tmp == NULL) {
@@ -61,6 +61,7 @@ set_rvs_mode(char c, struct cpkg *pk)
 	if (pk->mode) {
 		pk->tptr[LF] = rvs_search_mode;
 		pk->tptr['b'] = rvs_search_back;
+		pk->tptr[HT] = neutral;
 		pk->ps[strlen(pk->ps) - 2] = '?';
 		old_curs = pk->com.idx;
 		burn_n_rebuild(pk, HISTORY, old_curs);
@@ -69,6 +70,7 @@ set_rvs_mode(char c, struct cpkg *pk)
 		pk->tptr['b'] = disp_stream;
 		pk->ps[strlen(pk->ps) - 2] = '$';
 		old_curs = pk->com.idx;
+		paging(pk, PAG_CLEAR);
 		burn_n_rebuild(pk, HISTORY, old_curs);
 	}
 }
@@ -89,6 +91,8 @@ take_command(int indx, struct cpkg *pk)
 	if (*endptr != '\0' || i < 0)
 		return;
 	i--;
+	if ((size_t)i >= pk->hst_num)
+		return;
 	wsize = strlen(pk->history[i]);
 	memcpy(pk->com.command, pk->history[i], wsize + 1);
 	pk->curs = wsize;
@@ -110,7 +114,7 @@ rvs_search_mode(char c, struct cpkg *pk)
 			pk->word_search = pk->history;
 			pk->hst_num = pk->com.max_hst_num;
 		}
-		paging(pk, LEX_HANDLING_SPACE);
+		paging(pk, PAG_HANDLING_SPACE);
 		return;
 	}
 	if (pk->word_search != NULL && pk->word_search != pk->history) {
@@ -136,16 +140,16 @@ rvs_search_mode(char c, struct cpkg *pk)
 			if ((tmp = search_word(pk->history, pt, hn)) == NULL)
 				break;
 			pk->word_search = tmp;
-			paging(pk, LEX_COMMANDS);
-			break;
+			paging(pk, PAG_COMMANDS);
+			return;
 		}
 		if (pk->com.command[i + 1] != ' ')
 			break;
 		rvs_search(i + 2, pk);
 		if (pk->hst_num == 0)
 			break;
-		paging(pk, LEX_COMMANDS);
-		break;
+		paging(pk, PAG_COMMANDS);
+		return;
 	case 't':
 		if (pk->com.command[i + 1] != ' ')
 			break;
@@ -160,7 +164,7 @@ rvs_search_mode(char c, struct cpkg *pk)
 		i--;
 		if ((size_t)i > pk->hst_num)
 			break;
-		paging(pk, LEX_SPEC_COMM, &i);
+		paging(pk, PAG_SPEC_COMM, &i);
 		break;
 	}
 	pk->com.command[0] = '\0';
@@ -189,7 +193,7 @@ list_commands(int *base, struct cpkg *pk)
 		if (lines_printed >= pk->rvs_search_hst_max_prt)
 			break;
 		size_t wsize = strlen(pk->word_search[*base]);
-		if (len < bsize && len + wsize + 20 > bsize) {
+		if (len + wsize + 35 > bsize) {
 			write(STDOUT_FILENO, buf, len);
 			len = 0;
 		}
@@ -211,7 +215,7 @@ list_commands(int *base, struct cpkg *pk)
 		++lines_printed;
 	}
 	len += snprintf(&buf[len], bsize - len, "\n\r");
-	write(STDOUT_FILENO, buf, len + 1);
+	write(STDOUT_FILENO, buf, len);
 	if (*base < (int)pk->hst_num) {
 		char msg[50];
 		cmdlf = pk->hst_num - (size_t)*base;
@@ -250,6 +254,7 @@ rvs_search(int base, struct cpkg *pk)
 				++base;
 				i = 0;
 			}
+			++base;
 		} else {
 			word[i++] = pk->com.command[base++];
 		}
@@ -260,7 +265,7 @@ void
 rvs_search_back(char c, struct cpkg *pk)
 {
 	if (pk->com.idx == 0)
-		paging(pk, LEX_HANDLING_BACK);
+		paging(pk, PAG_HANDLING_BACK);
 	else
 		disp_stream(c, pk);
 }
@@ -271,18 +276,26 @@ paging(struct cpkg *pk, enum lex_paging state, ...)
 	va_list		ap;
 	static int base = 0;
 	va_start(ap, state);
-	if (state == LEX_HANDLING_SPACE) {
-		if (base >= (int)pk->hst_num)
+	if (state == PAG_HANDLING_SPACE) {
+		if (base >= (int)pk->hst_num) {
 			base = 0;
+			if (pk->word_search != NULL &&      
+			    pk->word_search != pk->history) {
+				free(pk->word_search);
+				pk->word_search = pk->history;
+				pk->hst_num = pk->com.max_hst_num;
+			}
+		}
 		list_commands(&base, pk);
-	} else if (state == LEX_HANDLING_BACK) {
+	} else if (state == PAG_HANDLING_BACK) {
 		uint8_t 	vl;
-		if (base == 0)
+		if (base == 0 || pk->word_search == NULL)
 			return;
 		vl = base % pk->rvs_search_hst_max_prt;
 		if (vl) {
 			base = pk->hst_num - vl;
 			base -= pk->rvs_search_hst_max_prt;
+			base = base < 0? 0: base;
 			list_commands(&base, pk);
 			return;
 		}
@@ -292,13 +305,27 @@ paging(struct cpkg *pk, enum lex_paging state, ...)
 			return;
 		}
 		list_commands(&base, pk);
-	} else if (state == LEX_COMMANDS) { 
+	} else if (state == PAG_COMMANDS) { 
 		base = 0;
 		list_commands(&base, pk);
-	} else if (state == LEX_SPEC_COMM) {
+		if (base < (int)pk->hst_num) {
+			int old_curs = pk->curs;
+			pk->com.command[0] = '\0';
+			pk->com.idx = 0;
+			pk->curs = 0;
+			burn_n_rebuild(pk, HISTORY, old_curs);
+		}
+	} else if (state == PAG_SPEC_COMM) {
 		int *val = va_arg(ap, int *);
 		list_commands(val, pk);
 		base = *val;
+	} else if (state == PAG_CLEAR) {
+		if (pk->word_search != NULL &&
+		    pk->word_search != pk->history) {
+			free(pk->word_search);
+			pk->word_search = NULL;
+		}
+		base = 0;
 	}
 	va_end(ap);
 }

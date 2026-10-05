@@ -12,3 +12,4 @@ last_crashes
 test_comp_afl
 term.dict
 wt
+out_env/

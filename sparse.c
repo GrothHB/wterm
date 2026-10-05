@@ -1,9 +1,8 @@
-#include "my_term.h"
-#include "tab.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "my_term.h"
+#include "tab.h"
 
 struct word_t
 parse(struct cpkg *pk)

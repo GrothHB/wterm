@@ -34,6 +34,12 @@ enum search_m {
 	ADD_SPACE
 };
 
+struct vi_edit_reg {
+	char		*command;
+	int		idx;
+	int		curs;
+};
+
 struct cpkg {
 	void			(**tptr)(char, struct cpkg *);
 	char 			**history, **word_search, *ps;
@@ -48,12 +54,7 @@ struct cpkg {
 	uint8_t			rvs_search_hst_max_prt;
 };
 
-struct word_t {
-	int 		sidx;
-	uint8_t 	type;
-};
-
-enum {
+enum lex_word_search {
 	INFST,
 	INWORD,
 	DOT,
@@ -61,6 +62,21 @@ enum {
 	FEXEC,
 	PDIRECT,
 	EXEC
+};
+
+struct word_t {
+	int 			sidx;
+	enum lex_word_search	type;
+};
+
+struct ve_snap {
+	char		*command;
+	int		curs, idx;
+};
+
+struct ve_regs {
+	char		*last_taken;
+	struct ve_snap	*snaps;
 };
 
 enum lex_state {
@@ -71,16 +87,31 @@ enum lex_state {
 };
 
 enum lex_paging {
-	LEX_HANDLING_SPACE,
-	LEX_HANDLING_BACK,
-	LEX_COMMANDS,
-	LEX_SPEC_COMM,
-	LEX_CLEAR
+	PAG_HANDLING_SPACE,
+	PAG_HANDLING_BACK,
+	PAG_COMMANDS,
+	PAG_SPEC_COMM,
+	PAG_CLEAR
 };
 
+enum vreg_state {
+	VREG_SAVE,
+	VREG_SNAP_SCR,
+	VREG_PUT,
+	VREG_SET_ALL,
+	VREG_UNDO,
+	VREG_UN_UNDO,
+	VREG_CLEAR_ALL
+};
+
+enum delete_state {
+	DS_LOOKING_WORD,
+	DS_IN_WORD,
+	DS_BEG_SPACE,
+};
 #ifndef _CFMAKERAW_DECLARED
 #define _CFMAKERAW_DECLARED
 struct termios;
 extern void cfmakeraw(struct termios *termios_p);
 #endif
-#endif
+#endif /* MY_TERM_H */

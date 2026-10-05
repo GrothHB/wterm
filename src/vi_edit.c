@@ -11,7 +11,7 @@
 #include "vi_edit.h"
 
 static uint8_t mult = 0;
-static enum grammar gram_state = GRAM_NONE;
+static enum grammar gramma_state = GRAMMAR_NONE;
 
 void
 set_vi_edit_mode(void (**ascii)(char, struct cpkg *))
@@ -24,12 +24,12 @@ set_vi_edit_mode(void (**ascii)(char, struct cpkg *))
 	ascii['h'] = ve_move_left;
 	ascii['l'] = ve_move_right;
 	ascii['e'] = ve_jmp_end_of_word;
-	ascii['c'] = ve_change_word;
+	ascii['c'] = ve_gramma;
 	ascii['b'] = ve_jmp_beg_of_word;
 	ascii['B'] = ve_jmp_beg;
 	ascii['E'] = ve_jmp_end;
-	ascii['d'] = ve_delet;
-	ascii['y'] = ve_yank;
+	ascii['d'] = ve_gramma;
+	ascii['y'] = ve_gramma;
 	ascii['x'] = ve_delet_char;
 	ascii['r'] = ve_change_char;
 	ascii['p'] = ve_put;
@@ -83,9 +83,9 @@ ve_move_right(char c, struct cpkg *pk)
 void
 ve_jmp_end_of_word(char c, struct cpkg *pk)
 {
-	char		buf[15];
-	int		i, cr;
-	size_t		len;
+	char buf[15];
+	size_t len;
+	int i, cr;
 	if (pk->curs == pk->com.idx)
 		return;
 	if (pk->com.command[pk->curs + 1] == ' ') {
@@ -121,21 +121,6 @@ ve_jmp_end_of_word(char c, struct cpkg *pk)
 }
 
 void
-change_word(char c, struct cpkg *pk)
-{
-	int		i;
-	(void)c;
-	for (i = 0; i < 128; ++i) {
-		if (isdigit(i))
-			pk->tptr[i] = ve_get_mult;
-		else
-			pk->tptr[i] = ve_wrong_exit;
-	pk->tptr['w'] = ve_gram_act_word;
-	pk->tptr['$'] = ve_gram_act_to_end;
-	pk->tptr['^'] = ve_gram_act_to_beg;
-}
-
-void
 ve_wrong_exit(char c, struct cpkg *pk)
 {
 	(void)c;
@@ -145,9 +130,9 @@ ve_wrong_exit(char c, struct cpkg *pk)
 void
 change_word_action(char c, struct cpkg *pk)
 {
-	int		i;
-	char		*dst, *src, cp[MAX_CANON + 1];
-	size_t		size;
+	char *dst, *src, cp[MAX_CANON + 1];
+	size_t size;
+	int i;
 	if (pk->curs == pk->com.idx)
 		return;
 	for (i = pk->curs; i < pk->com.idx; ++i) {
@@ -175,10 +160,10 @@ change_word_action(char c, struct cpkg *pk)
 void
 handle_vreg(enum vi_state act, struct cpkg *pk, ...)
 {
+	static struct ve_regs st;
+	va_list	ap;
 	static uint8_t c_idx = 0;
 	static uint8_t s_idx = 0;
-	static struct ve_regs st;
-	va_list		ap;
 	va_start(ap, pk);
 	if (act == VREG_SET_ALL) {
 		if ((st.snaps = malloc(sizeof(struct ve_snap) * 10)) == NULL)
@@ -186,7 +171,7 @@ handle_vreg(enum vi_state act, struct cpkg *pk, ...)
 		st.snaps[0].command = NULL;
 		st.last_taken = NULL;
 	} else if (act == VREG_CLEAR_ALL) {
-		int		i;
+		int i;
 		if (st.snaps == NULL)
 			return;
 		for (i = 0; i < 10; ++i) {
@@ -199,8 +184,8 @@ handle_vreg(enum vi_state act, struct cpkg *pk, ...)
 		c_idx = 0;
 	} else if (act == VREG_SNAP_SCR) {
 		if (s_idx == 10) {
-			char		*tmp;
-			size_t		wsize, size;
+			size_t wsize, size;
+			char *tmp;
 			wsize = strlen(pk->com.command);
 			if ((tmp = malloc(wsize + 1)) == NULL)
 				return;
@@ -213,8 +198,8 @@ handle_vreg(enum vi_state act, struct cpkg *pk, ...)
 			st.snap[9].curs = pk->curs;
 			c_idx = 9;
 		} else {
-			char		*tmp;
-			size_t		wsize;
+			size_t wsize;
+			char *tmp;
 			wsize = strlen(pk->com.command);
 			if ((tmp = malloc(wsize + 1)) == NULL)
 				return;
@@ -225,14 +210,14 @@ handle_vreg(enum vi_state act, struct cpkg *pk, ...)
 			c_idx = s_idx - 1;
 		}
 	} else if (act == VREG_SAVE) {
-		char 		*tmp;
+		char *tmp;
 		if ((tmp = strdup(va_arg(ap, char *))) == NULL)
 			return;
 		st.last_taken = tmp;
 	} else if (act == VREG_PUT) {
-		char		*dst, *src;
-		size_t		wsize, csize;
-		int		old_curs;
+		size_t wsize, csize;
+		char *dst, *src;
+		int old_curs;
 		if (st.last_taken == NULL)
 			return;
 		wsize = strlen(st.last_taken);
@@ -248,8 +233,8 @@ handle_vreg(enum vi_state act, struct cpkg *pk, ...)
 		pk->com.idx += wsize;
 		burn_n_rebuild(pk, HISTORY, old_curs);
 	} else if (act == VREG_UNDO) {
-		char		*ptr;
-		int		old_curs;
+		int old_curs;
+		char *ptr;
 		if (s_idx == 0)
 			return;
 		old_curs = pk->curs;
@@ -261,8 +246,8 @@ handle_vreg(enum vi_state act, struct cpkg *pk, ...)
 		if (c_idx > 0)
 			c_idx--;
 	} else if (act == VREG_UN_UNDO) {
-	 	char		*ptr;
-		int		old_curs;
+		int old_curs;
+	 	char *ptr;
 		if (c_idx + 1 == s_idx)
 			return;
 		++c_idx;
@@ -383,22 +368,6 @@ ve_jmp_end(char c, struct cpkg *pk)
 }
 
 void
-ve_delete(char c, struct cpkg *pk)
-{
-	int		i;
-	for (i = 0; i < 128; ++i) {
-		if (isdigit(i))
-			ascii[i] = ve_get_mul;
-		else
-			ascii[i] = ve_wrong_exit;
-	}
-	ascii['w'] = ve_delete_act_word;
-	ascii['$'] = ve_delete_act_to_end;
-	ascii['d'] = ve_delete_act_line;
-	ascii['^'] = ve_delete_act_to_beg;
-}
-
-void
 ve_get_mult(char c, struct cpkg *pk)
 {
 	char			*endptr, ptr[2];
@@ -413,18 +382,17 @@ ve_get_mult(char c, struct cpkg *pk)
 }
 
 void
-ve_gram_act_word(char c, struct cpkg *pk)
+ve_gramma_act_word(char c, struct cpkg *pk)
 {
-	char				*dst, *src;
-	int				i, del_ch;
-	size_t				size;
-	uint8_t				c_words;
-	enum delete_state		state;
+	char *dst, *src;
+	int del_ch;
+	size_t size, fidx;
 	(void)c;
-	if (mult == 0 || gram_state == GRAM_NONE) {
-		gram_state = GRAM_NONE;
+	if (mult == 0 || grammar_state == GRAM_NONE) {
+		grammar_state = GRAM_NONE;
 		return;
 	}
+	fidx = find_last_word(pk);
 	state = DS_LOOKING_WORD;
 	if (mult > 0) {
 		c_words = mult;
@@ -434,40 +402,14 @@ ve_gram_act_word(char c, struct cpkg *pk)
 		set_vi_mode(pk->tptr);
 		return;
 	}
-	if (gram_state == GRAM_DELETE || gram_state == GRAM_CHANGE_WORD)
+	if (grammar_state == GRAM_DELETE || grammar_state == GRAM_CHANGE_WORD)
 		handle_vreg(VREG_SNAP_SCR, pk);
-	if (pk->com.command[pk->curs] == ' ') {
-		state = DS_BEG_SPACE;
-		i = pk->curs + 1;
-	} else {
-		i = pk->curs;
-	}
-	for (; i < pk->com.idx; ++i) {
-		if (isspace(pk->com.command[i]) && state == DS_IN_WORD) {
-			state = DS_LOOKING_WORD;
-			continue;
-		}
-		if  (isspace(pk->com.command[i]) && state == DS_LOOKING_WORD)
-			continue;
-		if (!isspace(pk->com.command[i]) && state == DS_LOOKING_WORD) {
-			if (!c_words)
-				break;
-			--c_words;
-			state = DS_IN_WORD;
-		}
-		if (!isspace(pk->com.command[i]) && state == DS_BEG_SPACE) {
-			if (!c_words)
-				break;
-			--c_words;
-			state = DS_IN_WORD;
-		}
-	}
 	dst = &pk->com.command[pk->curs];
-	src = &pk->com.command[i];
-	size = pk->com.idx - i + 1;
-	if (gram_state == GRAM_DELETE || gram_state == GRAM_CHANGE_WORD) {
+	src = &pk->com.command[fidx];
+	size = pk->com.idx - fidx + 1;
+	if (grammar_state == GRAM_DELETE || grammar_state == GRAM_CHANGE_WORD) {
 		memmove(dst, src, size);
-		del_ch = i - pk->curs;
+		del_ch = fidx - pk->curs;
 		pk->com.idx -= del_ch;
 		if (pk->curs > 0 && pk->curs == pk->com.idx) {
 			pk->curs--;
@@ -475,25 +417,25 @@ ve_gram_act_word(char c, struct cpkg *pk)
 		} else {
 			burn_n_rebuild(pk, INLINE_ADD, 0);
 		}
-	} else if (gram_state == GRAM_YANK) {
-		char			st[MAX_CANON + 1];
+	} else if (grammar_state == GRAM_YANK) {
+		char st[MAX_CANON + 1];
 		strlcpy(st, src, size + 1);
 		handle_vreg(VREG_SAVE, pk, st);
 	}
-	if (gram_state == GRAM_CHANGE_WORD) {
+	if (grammar_state == GRAM_CHANGE_WORD) {
 		init_ascii(pk->tptr);
-		gram_state = GRAM_NONE;
+		grammar_state = GRAM_NONE;
 	}
 }
 
 void
-ve_gram_act_to_end(char c, struct cpkg *pk)
+ve_gramma_act_to_end(char c, struct cpkg *pk)
 {
-	int			old_curs;
+	int old_curs;
 	(void)c;
 	if (pk->curs == pk->com.idx)
 		return;
-	if (gram_state == GRAM_DELETE) {
+	if (grammar_state == GRAMMAR_DELETE) {
 		handle_vreg(VREG_SNAP_SCR, pk);
 		pk->com.idx = pk->curs;
 		pk->com.command[pk->com.idx] = '\0';
@@ -501,20 +443,20 @@ ve_gram_act_to_end(char c, struct cpkg *pk)
 		if (pk->curs > 0)
 			pk->curs--;
 		burn_n_rebuild(pk, HISTORY, old_curs);
-	} else if (gram_state == GRAM_YANK) {
-		char			st[MAX_CANON + 1];
+	} else if (grammar_state == GRAMMAR_YANK) {
+		char st[MAX_CANON + 1];
 		strlcpy(st, &pk->com.command[pk->curs], pk->com.idx - pk->curs);
 		handle_vreg(VREG_SAVE, pk, st);
 	}
-	gram_state = GRAM_NONE;
+	grammar_state = GRAMMAR_NONE;
 }
 
 void
-ve_gram_act_line(char c, struct cpkg *pk)
+ve_gramma_act_line(char c, struct cpkg *pk)
 {
-	char			*dst, *src;
-	size_t			size, src_idx, fst_idx_line;
-	int			line, old_curs;
+	char *dst, *src;
+	size_t size, src_idx, fst_idx_line;
+	int line, old_curs;
 	line = pk->curs / pk->screen_limit;
 	old_curs = pk->curs;
 	fst_idx_line = line * pk->screen_limit;
@@ -536,18 +478,19 @@ ve_gram_act_line(char c, struct cpkg *pk)
 }
 
 void
-ve_delete_act_to_beg(char c, struct cpkg *pk)
+ve_gramma_act_to_beg(char c, struct cpkg *pk)
 {
-	char			*dst, *src;
-	size_t			size;
-	int			old_curs;
+	char *dst, *src;
+	size_t size;
+	int old_curs;
 	(void)c;
 	if (pk->curs == 0) {
-		if (gram_state == GRAM_CHANGE_WORD)
+		if (grammar_state == GRAMMAR_CHANGE_WORD)
 			init_ascii(pk->tptr);
 		return;
 	}
-	if (gram_state == GRAM_DELETE || gram_state == GRAM_CHANGE_WORD) {
+	if (grammar_state == GRAMMAR_DELETE || grammar_state ==
+			GRAMMAR_CHANGE_WORD) {
 		handle_vreg(VREG_SNAP_SCR, pk);
 		old_curs = pk->curs;
 		dst = pk->com.command;
@@ -558,25 +501,77 @@ ve_delete_act_to_beg(char c, struct cpkg *pk)
 		pk->com.idx -= old_curs;
 		burn_n_rebuild(pk, HISTORY, old_curs);
 		put_cursor(pk, pk->com.idx);
-	} else if (gram_state == GRAM_YANK) {
-		char			st[MAX_CANON + 1];
+	} else if (grammar_state == GRAMMAR_YANK) {
+		char st[MAX_CANON + 1];
 		strlcpy(st, &pk->com.command[pk->curs], pk->curs + 1);
 		handle_vreg(VREG_SAVE, pk, st);
 	}
-	gram_state = GRAM_NONE;
+	grammar_state = GRAMMAR_NONE;
 }
 
 void
-ve_yank(char c, struct cpkg *pk)
+ve_gramma(char c, struct cpkg *pk)
 {
-	int			i;
-	(void)c;
+	int i;
 	for (i = 0; i < 128; ++i)
 		pk->tptr[i] = ve_wrong_exit;
 	for (i = 0; i < 10; ++i)
 		pk->tptr[i + '0'] = ve_get_mul;
-	pk->tptr['w'] = ve_yank_act_word;
-	pk->tptr['y'] = ve_yank_act_line;
-	pk->tptr['$'] = ve_yank_act_to_end;
-	pk->tptr['^'] = ve_yank_acto_to_beg;
+	switch (c) {
+	case 'y':
+		gramma_state = GRAMMAR_YANK;
+		pk->tptr['y'] = ve_gramma_act_line;
+		break;
+	case 'c':
+		gramma_state = GRAMMAR_CHANGE_WORD;
+		break;
+	case 'd':
+		gramma_state = GRAMMAR_DELETE;
+		ascii['d'] = ve_gramma_act_line;
+		break;
+	default:
+		break;
+	}
+	ascii['w'] = ve_gramma_act_word;
+	ascii['$'] = ve_gramma_act_to_end;
+	ascii['^'] = ve_gramma_act_to_beg;
+}
+
+size_t
+find_last_word(struct cpkg *pk)
+{
+	enum looking_word state;
+	uint8_t c_words;
+	int i;
+	if (mult > 0) {
+		c_words = mult;
+		mult = 0;
+	}
+	if (pk->com.command[pk->curs] == ' ') {
+		state = LK_BEG_SPACE;
+		i = pk->curs + 1;
+	} else {
+		i = pk->curs;
+	}
+	for (; i < pk->com.idx; ++i) {
+		if (isspace(pk->com.command[i]) && state == DS_IN_WORD) {
+			state = LK_LOOKING_WORD;
+			continue;
+		}
+		if  (isspace(pk->com.command[i]) && state == DS_LOOKING_WORD)
+			continue;
+		if (!isspace(pk->com.command[i]) && state == DS_LOOKING_WORD) {
+			if (!c_words)
+				break;
+			--c_words;
+			state = LK_IN_WORD;
+		}
+		if (!isspace(pk->com.command[i]) && state == DS_BEG_SPACE) {
+			if (!c_words)
+				break;
+			--c_words;
+			state = LS_IN_WORD;
+		}
+	}
+	return (i);
 }

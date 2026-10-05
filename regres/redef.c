@@ -21,6 +21,8 @@
 #define getcwd rand_answer_for_path
 #define write afl_mock_write
 #define getenv rand_env_assign
+#define execve my_execve
+#define setenv my_setenv
 
 static int 
 afl_tcgetattr(int fd, struct termios *p) 
@@ -66,6 +68,7 @@ afl_ioctl(int fd, int op, ...)
 {
 	va_list ap;
 	static uint8_t ct = 0;
+	(void)fd;
 	++ct;
 	va_start(ap, op);
 	if (op == TIOCGWINSZ) {
@@ -96,4 +99,10 @@ afl_poll(struct pollfd *fds, nfds_t fd, int timeout)
 #define poll afl_poll
 #define ioctl afl_ioctl
 
+#define parse afl_parse
+#include "../src/parse_env.c"
+#undef parse
+
+#undef  _POSIX_C_SOURCE
+#undef  _DEFAULT_SOURCE
 #include "../src/sterm.c"

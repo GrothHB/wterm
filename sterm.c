@@ -16,6 +16,8 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <errno.h>
+#include <time.h>
 #include "keytable.h"
 #include "tab.h"
 #include "my_term.h"
@@ -29,29 +31,33 @@
 #define PS2_SIZE 1
 #define BURN_N_REBUILD_MAX \
 (MAX_CANON + ((MAX_CANON) / (OPENBSD_MAX - 65) * 5 + 32))
-#define WAIT_FOR_SPEC 25
 
 static volatile sig_atomic_t term_sig = 0;
+#ifndef TEST
 int
 main(void)
 {
+	char 			command[MAX_CANON + 1];
 	struct termios 		raw;
 	struct cpkg 		header;
 	struct pollfd		fds[1];
 	struct sigaction	sa;
-	char 			command[MAX_CANON + 1];
-	unsigned char 		c;
 	char 			*command_history[HISTORY_MAX_SIZE + 1], *ptr;
 	void 			(*ascii[128])(char c, struct cpkg *);
+	unsigned char 		c;
 	char			ps[] = "$ ";
+	char			ps1[24];
 	size_t			ps_size;
+	int			timeout;
+	uint8_t			prv_sig;
 	nfds_t fds_num = 1;
+	timeout = -1;
 	sa.sa_handler = handle_term_inter;
-	sa.sa_flags = 0;
+	sa.sa_flags = prv_sig = 0;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGWINCH, &sa, NULL);
 	fds[0].fd = STDIN_FILENO;
-	fds[0].events |= POLLIN;
+	fds[0].events = POLLIN;
 	/* ascii array is declared in `keytable.h' */
 	init_ascii(ascii);
 #ifndef __AFL_COMPILER
@@ -83,10 +89,11 @@ main(void)
 		header.ps = ps;
 	} else {
 		ps_size = strlen(ptr);
-		if ((header.ps = malloc(ps_size + 3)) == NULL) {
+		if (ps_size > 21) {
 			header.ps = ps;
 		} else {
-			strlcpy(header.ps, ptr, ps_size + 1);
+			strlcpy(ps1, ptr, sizeof(ps1));
+			header.ps = ps1;
 			header.ps[ps_size++] = '$';
 			header.ps[ps_size++] = ' ';
 			header.ps[ps_size] = '\0';
@@ -98,26 +105,29 @@ main(void)
 
 	while (1) {
 		if (term_sig == 1) {
-			set_screen_limit(&header);
 			term_sig = 0;
+			set_screen_limit(&header);
 		}
-		if (poll(fds, fds_num, -1) > 0) {
+		if (poll(fds, fds_num, timeout) > 0) {
 			if (fds[0].revents & POLLIN) {
-				read(STDIN_FILENO, &c, 1);
+				int n = read(STDIN_FILENO, &c, 1);
+				if (n <= 0)
+					break;
 				if (c & (1 << 7))
 					continue;
 				ascii[c](c, &header);
 			}
 		}
 	}
-
+	if (header.ps != ps)
+		free(header.ps);
 	clear_mem(&header);
 #ifndef __AFL_COMPILER
 	tcsetattr(STDIN_FILENO, TCSANOW, &header.base);
 #endif
 	return (0);
 }
-
+#endif
 void
 hcntl(struct cpkg *pk)
 {
@@ -181,29 +191,37 @@ disp_stream(char c, struct cpkg *pk)
 void
 spec(char c, struct cpkg *pk)
 {
-	char 			sc[2];
+	static int time_period = -1;
+	char 			sc[16];
 	struct pollfd		fds;
 	nfds_t nfds = 1;
 	fds.fd = STDIN_FILENO;
 	fds.events = POLLIN;
-	/*struct timespec timeout, inttime;
-	int flag = fcntl(0, F_GETFL);
-	fcntl(0, F_SETFL, flag | O_NONBLOCK);
-	timeout.tv_sec = 0;
-	timeout.tv_nsec = 25000000;
-	nanosleep(&timeout, &inttime); */
-	
 	(void)c;
-
-	if (poll(&fds, nfds, WAIT_FOR_SPEC) <= 0) {
-		/*fcntl(0, F_SETFL, flag);*/
+	if (time_period == -1) {
+		char		*t;
+		if ((t = getenv("MY_KEYTIMEP")) != NULL) {
+			char		*endptr;
+			int val = strtol(t, &endptr, 0);
+			if (*endptr != '\0' || endptr == t || val < 0)
+				time_period = 50;
+			else
+				time_period = val;
+		} else if (getenv("SSH_TTY") != NULL) {
+			time_period = 200;
+		} else {
+			time_period = 50;
+		}
+	}
+	if (poll(&fds, nfds, time_period) <= 0) {
 		if (pk->tptr['x'] == disp_stream)
 			set_vil_mode(pk->tptr);
 	} else {
-		/*fcntl(0, F_SETFL, flag);*/
-		read(STDIN_FILENO, &sc, 2);
-		if (sc[0] == '[')
-			parse_esc_com(sc[1], pk);
+		if (fds.revents & POLLIN) {
+			ssize_t nc = read(STDIN_FILENO, sc, sizeof(sc));
+			if (2 == nc && sc[0] == '[')
+				parse_esc_com(sc[1], pk);
+		}
 	}
 }
 
@@ -515,7 +533,7 @@ neutral(char c, struct cpkg *pk)
 void
 find_fill(char c, struct cpkg *pk)
 {
-	char 		path[PATH_MAX], word[MAX_CANON]; 
+	char 		path[PATH_MAX], word[MAX_CANON + 1]; 
 	char 		*dummy, **xdirs, *dir, *tm;
 	int 		fidx, sofw, xf, i, flag;
 	struct word_t	sword;
@@ -525,6 +543,8 @@ find_fill(char c, struct cpkg *pk)
 	dummy = NULL;
 	sword = parse(pk);
 	sofw = pk->curs - sword.sidx;
+	if (sofw > MAX_CANON)
+		sofw = MAX_CANON;
 	strlcpy(word, &pk->com.command[sword.sidx], sofw + 1);
 	wsize = strlen(word);
 	if (wsize > 0) {
@@ -645,6 +665,7 @@ find_fill(char c, struct cpkg *pk)
 		if (flag)
 			return;
 		break;
+	case PDIRECT:
 	case DOT:
 		return;
 	}
@@ -742,90 +763,106 @@ parse_dir(char *form)
 void
 set_screen_limit(struct cpkg *pk)
 {
-	struct winsize			term_size;
-	static uint8_t last_screen_limit = 0;
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &term_size) == -1)
-		return;
+	char			buf[30];
+	struct winsize		term_size;
+	size_t			ps_size, bsize, len;
+	int			i, nol;
+	static uint8_t l_col = 0;
+	static uint8_t l_screen_limit = 0;
+	nol = 0;
+	ps_size = strlen(pk->ps);
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &term_size) == -1) {
+		if (!l_col)
+			l_col = OPENBSD_MAX;
+		if (!l_screen_limit) {
+			size_t r = ps_size % OPENBSD_MAX;
+			pk->screen_limit = OPENBSD_MAX - r;
+			l_screen_limit = pk->screen_limit;
+		}
+		term_size.ws_col = OPENBSD_MAX;
+	} else {
+		if (!l_col) {
+			if (term_size.ws_col < OPENBSD_MAX)
+				l_col = term_size.ws_col;
+			else
+				l_col = OPENBSD_MAX;
+		}
+		if (!l_screen_limit) {
+			if (term_size.ws_col < OPENBSD_MAX) {
+				size_t r = ps_size % term_size.ws_col;
+				pk->screen_limit = term_size.ws_col - r;
+				l_screen_limit = pk->screen_limit;
+			} else {
+				size_t r = ps_size % OPENBSD_MAX;
+				pk->screen_limit = OPENBSD_MAX - r;
+				l_screen_limit = pk->screen_limit;
+			}
+		}
+	}
 	if (pk->com.idx == 0) {
-		if (term_size.ws_col >= OPENBSD_MAX)
-			pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
-		else
-			pk->screen_limit = term_size.ws_col - strlen(pk->ps);
-		last_screen_limit = pk->screen_limit;
+		if (term_size.ws_col >= OPENBSD_MAX) {
+			size_t r = ps_size % OPENBSD_MAX;
+			pk->screen_limit = OPENBSD_MAX - r;
+			l_col = OPENBSD_MAX;
+		} else {
+			size_t r = ps_size % term_size.ws_col;
+			pk->screen_limit = term_size.ws_col - r;
+			l_col = term_size.ws_col;
+		}
+		return;
+	}
+	if (term_size.ws_col >= OPENBSD_MAX && l_col >= OPENBSD_MAX) {
+		pk->screen_limit = OPENBSD_MAX - (ps_size % OPENBSD_MAX);
+		if (!l_screen_limit)
+			l_screen_limit = pk->screen_limit;
 		return;
 	}
 	if (term_size.ws_col >= OPENBSD_MAX) {
-		if (last_screen_limit == 0) {
-			pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
-			last_screen_limit = pk->screen_limit;
-			return;
-		}
-		if (last_screen_limit < OPENBSD_MAX) {
-			char			buf[20];
-			size_t			bsize;
-			uint8_t 		nol;
-			pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
-			nol = (pk->curs / last_screen_limit);
-			if (nol <= 0) {
-				last_screen_limit = pk->screen_limit;
-				burn_n_rebuild(pk, INLINE_ADD, 0);
-				return;
-			}
-			bsize = snprintf(buf, sizeof(buf), "\033[%dA\r\033[J",
-					 (int)nol);
-			write(STDOUT_FILENO, buf, bsize);
-			burn_n_rebuild(pk, TERM_RB, 0);
-			last_screen_limit = pk->screen_limit;
-			return;
-		}
+		pk->screen_limit = OPENBSD_MAX - (ps_size % OPENBSD_MAX);
+	} else {
+		size_t r = ps_size % term_size.ws_col;
+		pk->screen_limit = term_size.ws_col - r;
 	}
-	if (term_size.ws_col < OPENBSD_MAX) {
-		pk->screen_limit = term_size.ws_col - strlen(pk->ps);
-		if (last_screen_limit > pk->screen_limit) {
-			char			buf[20];
-			size_t			bsize, i, nol;
-			nol = 0;
-			for (i = 0; (int)i <= pk->curs; ++i) {
-				size_t		cond1, cond2;
-				cond1 = i % last_screen_limit;
-				cond2 = i % pk->screen_limit;
-				if (i > 0 && cond1 == 0)
-					nol++;
-				if (i > 0 && cond2 == 0 && (int)i < pk->curs)
-					nol++;
-				if (cond1 == 0 && cond2 == 0 && i > 0)
-					nol--;
+	if (term_size.ws_col < l_col) {
+		int		ri;
+		uint8_t		mode1;
+		mode1 = ri = 0;
+		for (i = 0; i <= pk->curs; ++i) {
+			size_t 		cond1, cond2;
+			cond1 = i % l_screen_limit;
+			cond2 = ri % pk->screen_limit;
+			if (ri > 0 && cond2 == 0 && !mode1) {
+				++nol;
+				mode1 = 1;
+				ri = 0;
 			}
-			if (nol <= 0) {
-				last_screen_limit = pk->screen_limit;
-				burn_n_rebuild(pk, INLINE_ADD, 0);
-				return;
+			if (ri > 0 && cond1 == 0 && mode1) {
+				++nol;
+				mode1 = 0;
+				ri = 0;
 			}
-			bsize = snprintf(buf, sizeof(buf), "\033[%dA\r\033[J",
-					 (int)nol);
-			write(STDOUT_FILENO, buf, bsize);
-			burn_n_rebuild(pk, TERM_RB, 0);
-			last_screen_limit = pk->screen_limit;
-			return;
-		} else if (last_screen_limit < pk->screen_limit) {
-			char			buf[20];
-			size_t			bsize;
-			uint8_t 		nol;
-			nol = (pk->curs / last_screen_limit);
-			if (nol <= 0) {
-				last_screen_limit = pk->screen_limit;
-				burn_n_rebuild(pk, INLINE_ADD, 0);
-				return;
+			if (mode1 && ri > 0) {
+				nol += ri % term_size.ws_col == 0? 1: 0;
 			}
-			bsize = snprintf(buf, sizeof(buf), "\033[%dA\r\033[J",
-					 (int)nol);
-			write(STDOUT_FILENO, buf, bsize);
-			burn_n_rebuild(pk, TERM_RB, 0);
-			last_screen_limit = pk->screen_limit;
-			return;
+			ri++;
 		}
+		nol += (ps_size / l_col);
+	} else {
+		nol = pk->curs / l_screen_limit;
+		nol += ps_size / l_col;
 	}
-	last_screen_limit = pk->screen_limit;
+	bsize = sizeof(buf);
+	if (nol > 0)
+		len = snprintf(buf, bsize, "\033[%dA\r\033[J", nol);
+	else
+		len = snprintf(buf, bsize, "\r\033[J");
+	write(STDOUT_FILENO, buf, len);
+	l_screen_limit = pk->screen_limit;
+	if (term_size.ws_col >= OPENBSD_MAX)
+		l_col = OPENBSD_MAX;
+	else
+		l_col = term_size.ws_col;
+	burn_n_rebuild(pk, TERM_RB, 0);
 }
 
 void
@@ -833,4 +870,28 @@ handle_term_inter(int c)
 {
 	(void)c;
 	term_sig = 1;
+}
+
+void
+clear_screen(char c, struct cpkg *pk)
+{
+	(void)c;
+	write(STDOUT_FILENO, "\033[2J\033[H", 7);
+	burn_n_rebuild(pk, TERM_RB, 0);
+}
+
+void
+put_cursor(struct cpkg *pk, int old_pos)
+{
+	char			buf[20];
+	int			y1, y2, x1, x2;
+	size_t			len;
+	y1 = pk->curs / pk->screen_limit;
+	y2 = old_pos / pk->screen_limit;
+	if (y2 > y1)
+		len = snprintf(buf, sizeof(buf), "\033[%dA", y2 - y1);
+	else if (y1 > y2)
+		len = snprintf(buf, sizeof(buf), "\033[%dB", y1 - y2);
+	write(STDOUT_FILENO, buf, len);
+	set_cursor(pk->curs, pk);
 }

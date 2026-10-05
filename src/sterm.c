@@ -25,6 +25,7 @@
 #include "my_term.h"
 #include "sparse.h"
 #include "rvs_mode.h"
+#include "parse_env.h"
 #include "sterm.h"
 
 #define ESC '\033'
@@ -33,7 +34,10 @@
 #define OPENBSD_MAX 80 /* style(9) 80 column max */
 #ifndef HISTORY_MAX_SIZE
 #define HISTORY_MAX_SIZE 250 
-#endif
+#endif /* HISTORY_MAX_SIZE */
+#ifndef _POSIX_ARG_MAX
+#define _POSIX_ARG_MAX 4096
+#endif /* _POSIX_ARG_MAX */
 #define PS2_SIZE 1
 #define BURN_N_REBUILD_MAX (MAX_CANON * 2 + 32)
 #define COMMAND_IDX_REACH(x) ((x) >= 0 && (x) <= MAX_CANON + 1)
@@ -56,11 +60,12 @@ static void              push_command(int, struct cpkg *);
 static void              push_memory(int *, struct cpkg *);
 static void              set_screen_limit(struct cpkg *);
 static void              shift_n_fill(struct cpkg *, int, char *, struct word_t);
-static void		init_term(struct cpkg *);
-static void 		init_sig(void);
+static void		 init_term(struct cpkg *);
+static void 		 init_sig(void);
 
 extern char **environ;
 static volatile sig_atomic_t term_sig = 0;
+static long int arg_max = 0;
 
 int
 main(void)
@@ -123,6 +128,7 @@ main(void)
 		}
 	}
 	clear_mem(&header);
+	clear_hash();
 	tcsetattr(STDIN_FILENO, TCSANOW, &header.base);
 	return (0);
 }
@@ -442,13 +448,10 @@ set_cursor(int position, const struct cpkg *pk)
 void
 clear_comm(char c, struct cpkg *pk)
 {
-	const char er_msg[] = "wt: failed to execute shall command";
-	char buf[32], *shell;
+	char buf[32], *shell, *command, *old_path;
 	struct termios raw;
-	int len, slide, linep, wstatus;
-	size_t copied;
-	pid_t shell_id;
-	copied = -1;
+	int slide, linep;
+	size_t len;
 	(void)c;
 	pk->flag = SAVE;
 	hcntl(pk);
@@ -460,59 +463,32 @@ clear_comm(char c, struct cpkg *pk)
 	slide = linep - (pk->curs / pk->screen_limit);
 	if (slide) {
 		len = snprintf(buf, sizeof(buf), "\033[%dB\n\r", slide);
-		/*copied = strlcpy(&buf[len], pk->ps, sizeof(buf) - len);*/
-		assert(sizeof(buf) >= len /*+ copied*/);
-		write(STDOUT_FILENO, buf, len /* + copied */);
+		assert(sizeof(buf) >= len);
+		write(STDOUT_FILENO, buf, len);
 	} else {
-		/*len = snprintf(buf, sizeof(buf), "\n\r%s", pk->ps);
-		write(STDOUT_FILENO, buf, len);*/
 		write(STDOUT_FILENO, "\n\r", 2);
 	}
 	if ((shell = getenv("SHELL")) == NULL)
 		shell = "/bin/sh";
+	old_path = getenv("OLDPWD");
 	tcgetattr(STDIN_FILENO, &raw);
 	tcsetattr(STDIN_FILENO, TCSANOW, &pk->base);
-	shell_id = fork();
-	if (shell_id == 0) {
-		char *args[] = {
-			shell,
-			"-c",
-			pk->com.command,
-			NULL
-		};
-		if (execve(shell, args, environ) == -1)
-			_exit(127);
-	} else if (shell_id > 0) {
-		pid_t winf;
-		do
-			winf = waitpid(shell_id, &wstatus, WUNTRACED);
-		while (winf == -1 && errno == EINTR);
-		if (winf >= 0 && WIFEXITED(wstatus)) {
-			int ex = WEXITSTATUS(wstatus);
-			if (ex == 127) {
-				char msg[200];
-				size_t msgl;
-				msgl = snprintf(msg, sizeof(msg), "\r\033[J%s\n\r%s",
-						er_msg, pk->ps);
-				write(STDOUT_FILENO, msg, msgl);
-			} else {
-				char msg[200];
-				len = snprintf(msg, sizeof(msg), "\r%s", pk->ps);
-				write(STDOUT_FILENO, msg, len);
-			}
+	command = check_exec_safety(shell, pk->com.command, old_path);
+	if (command != NULL) {
+		if (handle_exec(shell, command) == 0 || term_sig) {
+			char msg[200];
+			len = snprintf(msg, sizeof(msg), "\r%s", pk->ps);
+			write(STDOUT_FILENO, msg, len);
+			pk->curs = 0;
+			pk->com.idx = 0;
+			pk->com.command[0] = '\0';
+		} else {
+			if (!term_sig)
+				burn_n_rebuild(pk, TERM_RB, 0);
 		}
-	} else {
-		const char fork_er[] = "wt: couldnt create child process";
-		char msg[200];
-		size_t msgl;
-		msgl = snprintf(msg, sizeof(msg), "\r\033[J%s\n\r%s", fork_er,
-				pk->ps);
-		write(STDOUT_FILENO, msg, msgl);
+		free(command);
 	}
 	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
-	pk->curs = 0;
-	pk->com.idx = 0;
-	pk->com.command[0] = '\0';
 }
 
 static void
@@ -990,4 +966,54 @@ init_sig(void)
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGWINCH, &sa, NULL);
+}
+
+char *
+check_exec_safety(const char *shell, char *command, const char *old_path)
+{
+	size_t bsize, len, csize, shell_size, ops;
+	size_t ssize, old_path_size, fcsize;
+	char path_comm[] = "export OLDPWD=";
+	char get_env_comm[] = ";set >&3";
+	char *buf;
+	assert(command != NULL && strlen(command) >= 0 &&
+		strlen(command) <= MAX_CANON);
+	csize = strlen(command);
+	fcsize = csize + strlen(get_env_comm);
+
+	if (old_path != NULL && (old_path_size = strlen(old_path)) > 0) {
+		ssize = strlen(path_comm);
+		ops = old_path_size + ssize;
+	} else {
+		ops = 0;
+	}
+	shell_size = strlen(shell);
+	assert(csize <= MAX_CANON);
+	/* Checking for size_t over-flow and limits of execve arguments */
+	if (SIZE_MAX - fcsize - ops - 3 < shell_size)
+		return (NULL);
+	check_arg_max();
+	assert(arg_max > 0);
+	if (fcsize + ops + shell_size + 3 > (size_t)arg_max)
+		return (NULL);
+	bsize = fcsize + 2 + ops;
+	if ((buf = malloc(bsize)) == NULL)
+		return (NULL);
+	if (ops > 0) {
+		memcpy(buf, path_comm, ssize);
+		memcpy(&buf[ssize], old_path, old_path_size);
+		buf[ops++] = ';';
+	}
+	memcpy(&buf[ops], command, csize);
+	len = ops + csize;
+	strlcpy(&buf[len], get_env_comm, bsize - len);
+	assert(strlen(buf) == bsize - 1 || strlen(buf) == fcsize);
+	return (buf);
+}
+
+void
+check_arg_max(void)
+{
+	if ((arg_max = sysconf(_SC_ARG_MAX)) == -1)
+		arg_max = _POSIX_ARG_MAX;
 }

@@ -44,5 +44,6 @@ void                     shift_n_fill(struct cpkg *, int, char *, struct word_t)
 char                     *parse_dir(char *);
 void                     set_screen_limit(struct cpkg *);
 void                     handle_term_inter(int);
+void                     clear_screen(char, struct cpkg *);
 
 #endif /* STERM_H */

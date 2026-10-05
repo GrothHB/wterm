@@ -7,5 +7,7 @@ char                     *rand_duplicate_of_string(const char *);
 char                     *rand_answer_for_path(char *, size_t);
 ssize_t                  afl_mock_write(int, const void *, size_t);
 char                     *rand_env_assign(const char *);
+void                     my_execve(const char *, char * const *, char * const *);
+void                     my_setenv(const char *, const char *, int);
 
 #endif /* CREATE_CHAOS_H */

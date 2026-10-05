@@ -1,6 +1,6 @@
 CFLAGS = -Wall -Wextra -pedantic -g -DNDEBUG
 COMP = clang
-SRCS = ./src/sterm.c ./src/tab_compl.c ./src/sparse.c ./src/compatb.c ./src/rvs_mode.c
+SRCS = ./src/sterm.c ./src/tab_compl.c ./src/sparse.c ./src/compatb.c ./src/rvs_mode.c ./src/parse_env.c
 OBJS = ${SRCS:.c=.o}
 
 CFLAG_OP = 

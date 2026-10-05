@@ -1,10 +1,12 @@
 #include <sys/types.h>
+
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#define CHUNK_MEM 4096
 
 static uint32_t mem_chaos = 0;
 /* as malloc */
@@ -83,4 +85,25 @@ rand_env_assign(const char *name)
 		}
 	}
 	return (getenv(name));
+}
+
+void
+my_execve(const char *path, char * const *args, char * const *envp)
+{
+	char buffer[CHUNK_MEM + 1];
+	ssize_t n;
+	(void)path;
+	(void)args;
+	(void)envp;
+	while ((n = read(STDIN_FILENO, buffer, CHUNK_MEM)) > 0)
+		write(3, buffer, n);
+	_exit(0);
+}
+
+void
+my_setenv(const char *name, const char *val, int overwrite)
+{
+	(void)name;
+	(void)val;
+	(void)overwrite;
 }

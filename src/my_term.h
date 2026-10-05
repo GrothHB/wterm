@@ -102,6 +102,8 @@ enum vreg_state {
 	VREG_UN_UNDO,
 	VREG_CLEAR_ALL
 };
+
+	
 #ifndef _CFMAKERAW_DECLARED
 #define _CFMAKERAW_DECLARED
 struct termios;
