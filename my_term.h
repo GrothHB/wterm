@@ -1,8 +1,8 @@
 #ifndef MY_TERM_H
 #define MY_TERM_H
 
-#include <stddef.h>
 #include <termios.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define NO_ACTION 0x0F
@@ -19,6 +19,7 @@
 struct i_command {
 	char 		*command;
 	int 		idx;
+	uint32_t	max_hst_num;
 };
 
 enum hflags {
@@ -33,6 +34,12 @@ enum search_m {
 	ADD_SPACE
 };
 
+struct vi_edit_reg {
+	char		*command;
+	int		idx;
+	int		curs;
+};
+
 struct cpkg {
 	void			(**tptr)(char, struct cpkg *);
 	char 			**history, **word_search, *ps;
@@ -43,16 +50,11 @@ struct cpkg {
 	enum search_m		fill;
 	size_t			hst_num;
 	uint8_t			mode;
-	uint8_t			rvs_action;
-	uint8_t			last_list_st;
+	uint8_t			screen_limit;
+	uint8_t			rvs_search_hst_max_prt;
 };
 
-struct word_t {
-	int 		sidx;
-	uint8_t 	type;
-};
-
-enum {
+enum lex_word_search {
 	INFST,
 	INWORD,
 	DOT,
@@ -62,6 +64,21 @@ enum {
 	EXEC
 };
 
+struct word_t {
+	int 			sidx;
+	enum lex_word_search	type;
+};
+
+struct ve_snap {
+	char		*command;
+	int		curs, idx;
+};
+
+struct ve_regs {
+	char		*last_taken;
+	struct ve_snap	*snaps;
+};
+
 enum lex_state {
 	LEX_IN_QUOTE,
 	LEX_NORMAL,
@@ -69,4 +86,26 @@ enum lex_state {
 	LEX_ESCAPE
 };
 
+enum lex_paging {
+	PAG_HANDLING_SPACE,
+	PAG_HANDLING_BACK,
+	PAG_COMMANDS,
+	PAG_SPEC_COMM,
+	PAG_CLEAR
+};
+
+enum vreg_state {
+	VREG_SAVE,
+	VREG_SNAP_SCR,
+	VREG_PUT,
+	VREG_SET_ALL,
+	VREG_UNDO,
+	VREG_UN_UNDO,
+	VREG_CLEAR_ALL
+};
+#ifndef _CFMAKERAW_DECLARED
+#define _CFMAKERAW_DECLARED
+struct termios;
+extern void cfmakeraw(struct termios *termios_p);
 #endif
+#endif /* MY_TERM_H */

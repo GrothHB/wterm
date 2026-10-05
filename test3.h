@@ -7,7 +7,9 @@ void                     set_rvs_mode(char, struct cpkg *);
 void                     set_vil_mode(void (**)(char, struct cpkg *));
 void                     take_command(int, struct cpkg *);
 void                     rvs_search_mode(char, struct cpkg *);
-void                     list_commands(int, struct cpkg *, int *);
+void                     list_commands(int *, struct cpkg *);
 void                     rvs_search(int, struct cpkg *);
+void                     rvs_search_back(char, struct cpkg *);
+void                     paging(struct cpkg *, enum lex_paging, ...);
 
 #endif /* TEST3_H */

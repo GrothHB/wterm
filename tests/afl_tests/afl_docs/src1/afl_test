@@ -1,0 +1,61 @@
+#!/bin/dash
+# Skrypt przygotowujący surowy poligon dla AFL++ (Czysty POSIX sh / dash)
+rm fuzzer_bin
+AFL_USE_ASAN=1 afl-clang-fast -O0 -g sterm.c test.c test2.c test3.c sparse.c -o fuzzer_bin
+
+mkdir -p afl_in
+mkdir -p afl_out
+
+# ---------------------------------------------------------
+# 1. ZIARNO A: Morderstwo bufora historii
+# ---------------------------------------------------------
+> afl_in/hist_overflow.txt # Bezpieczne wyzerowanie pliku (lepsze niż echo "")
+
+i=1
+while [ "$i" -le 300 ]; do
+    printf "cmd_%d\n" "$i" >> afl_in/hist_overflow.txt
+    i=$((i + 1))
+done
+
+# POSIX printf, używamy kodów ósemkowych (\033 zamiast \x1b dla absolutnej kompatybilności)
+printf "\033[A\033[A\033[A\033[A\033[B\033[B" >> afl_in/hist_overflow.txt
+
+# ---------------------------------------------------------
+# 2. ZIARNO B: Tab Completion
+# ---------------------------------------------------------
+printf "ls /usr/bi\t\n" > afl_in/tab_basic.txt
+printf "cat plik | gr\t\n" > afl_in/tab_pipe.txt
+printf "cd \"/home/user/dir with spaces\t\n" > afl_in/tab_quotes.txt
+printf "../../../etc/pass\t\n" > afl_in/tab_traversal.txt
+
+# ---------------------------------------------------------
+# 3. ZIARNO C: Reverse Search
+# \022 to ósemkowy kod dla DC2 (Ctrl+R / \x12)
+# ---------------------------------------------------------
+printf "pierwsza\ndruga\n\022r\022\033" > afl_in/rvs_search.txt
+
+# ---------------------------------------------------------
+# 4. SŁOWNIK AFL
+# ---------------------------------------------------------
+cat << 'EOF' > term.dict
+arrow_up="\x1b[A"
+arrow_down="\x1b[B"
+arrow_right="\x1b[C"
+arrow_left="\x1b[D"
+tab="\x09"
+enter="\x0a"
+ctrl_r="\x12"
+backspace="\x7f"
+escape="\x1b"
+pipe="|"
+quote="\""
+squote="'"
+redir_in="<"
+redir_out=">"
+semicolon=";"
+space=" "
+EOF
+
+printf "Fundamenty wylane. Gotowe do uruchomienia AFL++.\n"
+
+afl-fuzz -i afl_in -o afl_out -x term.dict -M main -- ./fuzzer_bin
