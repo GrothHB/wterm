@@ -1,5 +1,6 @@
 #ifndef TAB_H
 #define TAB_H
+#include <stdint.h>
 #include "my_term.h"
 #include "openbsd.h"
 
