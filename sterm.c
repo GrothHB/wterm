@@ -29,20 +29,20 @@
 #define PS2_SIZE 1
 #define BURN_N_REBUILD_MAX \
 (MAX_CANON + ((MAX_CANON) / (OPENBSD_MAX - 65) * 5 + 32))
-#define WAIT_FOR_SPEC 25
 
 static volatile sig_atomic_t term_sig = 0;
+#ifndef TEST
 int
 main(void)
 {
+	char 			command[MAX_CANON + 1];
 	struct termios 		raw;
 	struct cpkg 		header;
 	struct pollfd		fds[1];
 	struct sigaction	sa;
-	char 			command[MAX_CANON + 1];
-	unsigned char 		c;
 	char 			*command_history[HISTORY_MAX_SIZE + 1], *ptr;
 	void 			(*ascii[128])(char c, struct cpkg *);
+	unsigned char 		c;
 	char			ps[] = "$ ";
 	size_t			ps_size;
 	nfds_t fds_num = 1;
@@ -51,7 +51,7 @@ main(void)
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGWINCH, &sa, NULL);
 	fds[0].fd = STDIN_FILENO;
-	fds[0].events |= POLLIN;
+	fds[0].events = POLLIN;
 	/* ascii array is declared in `keytable.h' */
 	init_ascii(ascii);
 #ifndef __AFL_COMPILER
@@ -103,21 +103,24 @@ main(void)
 		}
 		if (poll(fds, fds_num, -1) > 0) {
 			if (fds[0].revents & POLLIN) {
-				read(STDIN_FILENO, &c, 1);
+				int n = read(STDIN_FILENO, &c, 1);
+				if (n <= 0)
+					break;
 				if (c & (1 << 7))
 					continue;
 				ascii[c](c, &header);
 			}
 		}
 	}
-
+	if (header.ps != ps)
+		free(header.ps);
 	clear_mem(&header);
 #ifndef __AFL_COMPILER
 	tcsetattr(STDIN_FILENO, TCSANOW, &header.base);
 #endif
 	return (0);
 }
-
+#endif
 void
 hcntl(struct cpkg *pk)
 {
@@ -181,29 +184,37 @@ disp_stream(char c, struct cpkg *pk)
 void
 spec(char c, struct cpkg *pk)
 {
-	char 			sc[2];
+	static int time_period = -1;
+	char 			sc[16];
 	struct pollfd		fds;
 	nfds_t nfds = 1;
 	fds.fd = STDIN_FILENO;
 	fds.events = POLLIN;
-	/*struct timespec timeout, inttime;
-	int flag = fcntl(0, F_GETFL);
-	fcntl(0, F_SETFL, flag | O_NONBLOCK);
-	timeout.tv_sec = 0;
-	timeout.tv_nsec = 25000000;
-	nanosleep(&timeout, &inttime); */
-	
 	(void)c;
-
-	if (poll(&fds, nfds, WAIT_FOR_SPEC) <= 0) {
-		/*fcntl(0, F_SETFL, flag);*/
+	if (time_period == -1) {
+		char		*t;
+		if ((t = getenv("MY_KEYTIMEP")) != NULL) {
+			char		*endptr;
+			int val = strtol(t, &endptr, 0);
+			if (*endptr != '\0' || endptr == t || val < 0)
+				time_period = 50;
+			else
+				time_period = val;
+		} else if (getenv("SSH_TTY") != NULL) {
+			time_period = 200;
+		} else {
+			time_period = 50;
+		}
+	}
+	if (poll(&fds, nfds, time_period) <= 0) {
 		if (pk->tptr['x'] == disp_stream)
 			set_vil_mode(pk->tptr);
 	} else {
-		/*fcntl(0, F_SETFL, flag);*/
-		read(STDIN_FILENO, &sc, 2);
-		if (sc[0] == '[')
-			parse_esc_com(sc[1], pk);
+		if (fds.revents & POLLIN) {
+			ssize_t nc = read(STDIN_FILENO, sc, sizeof(sc));
+			if (2 == nc && sc[0] == '[')
+				parse_esc_com(sc[1], pk);
+		}
 	}
 }
 
@@ -515,7 +526,7 @@ neutral(char c, struct cpkg *pk)
 void
 find_fill(char c, struct cpkg *pk)
 {
-	char 		path[PATH_MAX], word[MAX_CANON]; 
+	char 		path[PATH_MAX], word[MAX_CANON + 1]; 
 	char 		*dummy, **xdirs, *dir, *tm;
 	int 		fidx, sofw, xf, i, flag;
 	struct word_t	sword;
@@ -525,6 +536,8 @@ find_fill(char c, struct cpkg *pk)
 	dummy = NULL;
 	sword = parse(pk);
 	sofw = pk->curs - sword.sidx;
+	if (sofw > MAX_CANON)
+		sofw = MAX_CANON;
 	strlcpy(word, &pk->com.command[sword.sidx], sofw + 1);
 	wsize = strlen(word);
 	if (wsize > 0) {
@@ -744,8 +757,12 @@ set_screen_limit(struct cpkg *pk)
 {
 	struct winsize			term_size;
 	static uint8_t last_screen_limit = 0;
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &term_size) == -1)
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &term_size) == -1) {
+		pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
+		if (!last_screen_limit)
+			last_screen_limit = pk->screen_limit;
 		return;
+	}
 	if (pk->com.idx == 0) {
 		if (term_size.ws_col >= OPENBSD_MAX)
 			pk->screen_limit = OPENBSD_MAX - strlen(pk->ps);
@@ -834,3 +851,4 @@ handle_term_inter(int c)
 	(void)c;
 	term_sig = 1;
 }
+
