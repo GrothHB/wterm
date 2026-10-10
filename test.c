@@ -13,10 +13,11 @@
 #include <err.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 #include "my_term.h"
 #include "tab.h"
 
-#define OPENBSD_MAX 77
+#define OPENBSD_MAX 80
 #define PIECE_OF_MEM 2048
 
 int
@@ -36,17 +37,19 @@ message(int nf)
 }
 
 int
-fcompare(const void* x, const void* y)
+fcompare(const void *x, const void *y)
 {
-	return (strcmp(*(char**)x, *(char**)y));
+	return (strcmp(*(char **)x, *(char **)y));
 }
 
 char *
 fill_command(char *word, char *path, enum search_m *fflag)
 {
+	char 			sbuf[PIECE_OF_MEM];
 	DIR* 			ptr;
 	struct dirent 		*dir_list;
 	struct stat 		btyp;
+	struct winsize		ws;
 	char 			**farray, **tmp, *t, *base, *fw;
 	static char		ret[] = "NOTF";
 	static char		retmulti[] = "MF";
@@ -54,18 +57,22 @@ fill_command(char *word, char *path, enum search_m *fflag)
 	size_t 			c_size, c_index, i, bsize, len, strsize, chinl;
 	size_t 			max_length, mflag, inter_idx, inter_size, last;
 	int			fst;
-	char 			sbuf[PIECE_OF_MEM];
+	uint8_t			scrn_limit;
 	bsize = sizeof(sbuf);
 	c_index = max_length = mflag = inter_idx = 0;
 	c_size = 1;
+	scrn_limit = OPENBSD_MAX;
 	strsize = strlen(word);
 	farray = malloc(sizeof(char*));
-
+	if (farray == NULL)
+		return (NULL);
 	if ((ptr = opendir(path)) == NULL) {
 		free(farray);
 		return (NULL);
 	}
-
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1 && ws.ws_col > 0 &&
+	    ws.ws_col < OPENBSD_MAX)
+		scrn_limit = ws.ws_col;
 	while ((dir_list = readdir(ptr)) != NULL) {
 		if (word[0] != '.')
 			if (dir_list->d_name[0] == '.')
@@ -97,8 +104,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 				goto clean;
 			else
 				farray[c_index] = t;
-		}
-		else {
+		} else {
 			if ((t = strdup(dir_list->d_name)) == NULL)
 				goto clean;
 			else 
@@ -131,8 +137,10 @@ fill_command(char *word, char *path, enum search_m *fflag)
 	}
 	if (inter_idx) {
 		fw = strdup(farray[0]);
-		if (fw == NULL)
+		if (fw == NULL) {
 			inter_idx = 0;
+			goto clean;
+		}
 		if (strlen(fw) + 1 > strsize + inter_idx)
 			fw[strsize + inter_idx] = '\0';
 		*fflag = CLOSE_FILL;
@@ -146,8 +154,8 @@ fill_command(char *word, char *path, enum search_m *fflag)
 	}
 	write(STDOUT_FILENO, "\n\r", 2);
 	len = chinl = 0;
-	if (max_length > OPENBSD_MAX)
-		max_length = OPENBSD_MAX;
+	if (max_length > scrn_limit)
+		max_length = scrn_limit;
 	for (i = 0; i < c_index; ++i) {
 		size_t		condp, nr;
 		size_t fwl = strlen(farray[i]);
@@ -157,7 +165,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 			len = 0;
 			chinl = 0;
 		}
-		if (fwl > OPENBSD_MAX) {
+		if (fwl > scrn_limit) {
 			size_t chg = 0;
 			if (chinl > 0) {
 				len += snprintf(&sbuf[len], bsize - len,
@@ -165,8 +173,8 @@ fill_command(char *word, char *path, enum search_m *fflag)
 				chinl = 0;
 			}
 			while (chg < fwl) {
-				int chunk = ((fwl - chg) > OPENBSD_MAX)?
-						OPENBSD_MAX: fwl - chg;
+				int chunk = ((fwl - chg) > scrn_limit)?
+						scrn_limit: fwl - chg;
 				if (len + chunk + 3 > bsize) {
 					write(STDOUT_FILENO, sbuf, len);
 					len = 0;
@@ -185,7 +193,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 			farray[i] = NULL;
 			continue;
 		}
-		if (chinl + 2 + fwl > OPENBSD_MAX) {
+		if (chinl + 2 + fwl > scrn_limit) {
 			len += snprintf(&sbuf[len], bsize - len, "\n\r");
 			write(STDOUT_FILENO, sbuf, len);
 			len = 0;
