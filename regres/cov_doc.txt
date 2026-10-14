@@ -1,0 +1,28 @@
+File 'keytable.h'
+Lines executed:100.00% of 15
+Creating 'keytable.h.gcov'
+
+File 'sterm.c'
+Lines executed:77.30% of 608
+Creating 'sterm.c.gcov'
+
+File 'test.c'
+Lines executed:76.40% of 161
+Creating 'test.c.gcov'
+
+File 'test2.c'
+Lines executed:57.50% of 40
+Creating 'test2.c.gcov'
+
+File 'test3.c'
+Lines executed:96.33% of 245
+Creating 'test3.c.gcov'
+
+File 'sparse.c'
+Lines executed:98.78% of 82
+Creating 'sparse.c.gcov'
+
+File 'create_chaos.c'
+Lines executed:0.00% of 18
+Creating 'create_chaos.c.gcov'
+

@@ -1,0 +1,16 @@
+afl_out/
+afl_in/
+fuzzer_bin
+ver
+afl_reg_tests
+afl_out_klaster
+afl_test
+check_cov
+corpus
+corpus_min
+corpus_min2
+cov_bin
+last_crashes
+test_comp_afl
+term.dict
+wt
