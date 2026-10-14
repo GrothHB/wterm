@@ -1,8 +1,12 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include "my_term.h"
 #include "tab.h"
+
+#define COMMAND_IDX_REACH(x) ((x) >= 0 && (x) <= MAX_CANON + 1)
 
 struct word_t
 parse(struct cpkg *pk)
@@ -14,6 +18,7 @@ parse(struct cpkg *pk)
 	lw.type = EXEC;
 	lw.sidx = wflag = 0;
 	state = LEX_NORMAL;
+	assert(COMMAND_IDX_REACH(pk->curs));
 	for (i = 0; i < pk->curs; ++i) {
 		c = pk->com.command[i];
 		switch (state) {
@@ -108,6 +113,9 @@ parse(struct cpkg *pk)
 			break;
 		case LEX_ESCAPE:
 			state = prev_state;
+			break;
+		default:
+			assert(0);
 			break;
 		}
 	}

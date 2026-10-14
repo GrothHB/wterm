@@ -1,0 +1,4 @@
+
+AFL_USE_ASAN=1 afl-clang-fast \
+	-O0 -g -Wall -Wextra redef.c ../src/test.c ../src/test2.c ../src/test3.c ../src/sparse.c \
+	create_chaos.c -o fuzzer_bin || exit 1

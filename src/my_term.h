@@ -15,7 +15,6 @@
 #define SPACE '\040'
 #define DC2 0x12
 
-
 struct i_command {
 	char 		*command;
 	int 		idx;

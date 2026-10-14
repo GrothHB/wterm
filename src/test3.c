@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +11,7 @@
 #include "sterm.h"
 #include "test3.h"
 
-#define OPENBSD_MAX 77 /* style(9) 80 column max */
+#define OPENBSD_MAX 80 /* style(9) 80 column max */
 #define MAX_SIZE_FOR_PRINT (MAX_CANON + (MAX_CANON / OPENBSD_MAX) * \
 			    2 + 24)
 #define WORD_SEARCH 0xF
@@ -33,6 +34,7 @@ search_word(char **hist, char *lw, size_t *nf)
 			continue;
 		}
 		if (c_idx == c_size - 1) {
+			assert(c_size < (SIZE_MAX / 2));
 			c_size *= 2;
 			tmp = reallocarray(sh, c_size, sizeof(char *));
 			if (tmp == NULL) {
@@ -94,6 +96,7 @@ take_command(int indx, struct cpkg *pk)
 	if ((size_t)i >= pk->hst_num)
 		return;
 	wsize = strlen(pk->history[i]);
+	assert(wsize <= MAX_CANON);
 	memcpy(pk->com.command, pk->history[i], wsize + 1);
 	pk->curs = wsize;
 	set_cursor(pk->curs, pk);
@@ -187,6 +190,7 @@ list_commands(int *base, struct cpkg *pk)
 	bsize = sizeof(buf);
 	lines_printed = len = 0;
 	rvs_disp_max = 79 - strlen(pk->ps);
+	assert(rvs_disp_max > 0);
 	while (*base < (int)pk->hst_num) {
 		int 		idx;
 		int hidx = 0;
@@ -202,6 +206,10 @@ list_commands(int *base, struct cpkg *pk)
 		buf[len++] = ':';
 		buf[len++] = ' ';
 		for (idx = 0; idx < (int)wsize; ++idx) {
+			if (len + 9 > bsize) {
+				write(STDOUT_FILENO, buf, len);
+				len = 0;
+			}
 			if (idx > 0 && idx % rvs_disp_max == 0) {
 				buf[len++] = '\n';
 				buf[len++] = '\r';
@@ -291,6 +299,7 @@ paging(struct cpkg *pk, enum lex_paging state, ...)
 		uint8_t 	vl;
 		if (base == 0 || pk->word_search == NULL)
 			return;
+		assert(pk->rvs_search_hst_max_prt > 0);
 		vl = base % pk->rvs_search_hst_max_prt;
 		if (vl) {
 			base = pk->hst_num - vl;

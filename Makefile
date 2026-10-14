@@ -1,6 +1,7 @@
-CFLAGS = -Wall -Wextra -pedantic -g
-COMP = gcc
-SRCS = sterm.c test.c sparse.c compatb.c test2.c test3.c
+CFLAGS = -Wall -Wextra -pedantic -g -DNDEBUG
+COMP = clang
+SRCS = ./src/sterm.c ./src/test.c ./src/sparse.c ./src/compatb.c ./src/test2.c \
+	./src/test3.c
 OBJS = ${SRCS:.c=.o}
 
 CFLAG_OP = 
@@ -36,4 +37,4 @@ wt: $(OBJS)
 	$(COMP) $(CFLAGS) $(OPT) $(DEB) $(CFLAG_OP) $(STEST) $(OSIZE) -c -o $@ $<
 
 clean:
-	rm *.o
+	rm ./src/*.o
