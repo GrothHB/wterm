@@ -1,0 +1,90 @@
+#!/bin/ksh
+# Skrypt hybrydowy: Ekstremalna szybkość AFL + Wypełnianie limitów historii
+
+echo "[*] Czyszczenie srodowiska..."
+#rm -rf afl_in afl_out fuzzer_bin term.dict
+mkdir -p afl_in afl_out
+export MALLOC_OPTIONS=S
+afl-clang -fstack-protector-all -ftrivial-auto-var-init=pattern \
+    -O0 -g -Wall -Wextra sterm.c test.c test2.c test3.c sparse.c create_chaos.c -o fuzzer_bin || exit 1
+
+echo "[*] Generowanie inteligentnego slownika terminala..."
+> term.dict
+
+# 1a. Kody sterujące i znaki specjalne
+cat << 'EOF' >> term.dict
+esc_A="\x1b[A"
+esc_B="\x1b[B"
+esc_C="\x1b[C"
+esc_D="\x1b[D"
+tab="\x09"
+enter="\x0a"
+ctrl_r="\x12"
+backspace="\x7f"
+escape="\x1b"
+pipe="|"
+ampersand="&"
+redirect_out=">"
+redirect_in="<"
+dquote="\""
+squote="'"
+slash="/"
+dot="."
+EOF
+
+# 1b. Wyciągnięcie prawdziwych komend z /bin/ (Poprawione formatowanie awk)
+ls /bin | grep -E '^[a-z]{2,6}$' | head -n 40 | awk '{ printf "cmd_%s=\"%s\"\n", $1, $1 }' >> term.dict
+
+
+echo "[*] Budowa zoptymalizowanych Ziaren Startowych..."
+
+# ---------------------------------------------------------
+# ZIARNO 1: The Deep History (Dokładnie 500 komend + Skakanie)
+# ---------------------------------------------------------
+# Najpierw bezwzględnie ładujemy 500 komend, żeby dobić do limitu bufora.
+# Dopiero na samym końcu (kiedy bufor jest pełny) robimy brutalne manipulacje,
+# z których słynął Twój pierwszy skrypt.
+awk 'BEGIN {
+    # Zapełnienie historii do 500
+    for(i=1; i<=500; i++) printf "komenda_nr_%d\n", i;
+    
+    # Krawędzie strzałek (overflow indeksów historii)
+    printf "\033[A\033[A\033[A\033[B\033[B\n";
+    
+    # Wejście w Reverse Search na głębokiej historii, szukanie i ucieczka
+    printf "\022komenda_nr_250\022\177\033\n";
+}' > afl_in/history_and_rvs.txt
+
+# ---------------------------------------------------------
+# ZIARNO 2: Tab Completion (Precyzyjne krawędzie)
+# ---------------------------------------------------------
+# Złączone Twoje oryginalne wektory z pierwszego testu + mały spam tabulatorów
+printf "ls /usr/bi\011\n" > afl_in/tab_abuse.txt
+printf "cat plik | gr\011\n" >> afl_in/tab_abuse.txt
+printf "cd \"/home/user/dir with spaces\011\n" >> afl_in/tab_abuse.txt
+printf "../../../etc/pass\011\n" >> afl_in/tab_abuse.txt
+awk 'BEGIN { for(i=1; i<=10; i++) printf "cd \"/usr/local\011\011\011\n"; }' >> afl_in/tab_abuse.txt
+
+# ---------------------------------------------------------
+# ZIARNO 3: Oversized Payload (Test buforów na MAX_CANON)
+# ---------------------------------------------------------
+# Zamiast 200 takich komend, robimy ich 10. To wystarczy, żeby 
+# udowodnić ASAN-owi, czy przekraczamy pamięć w strlcpy/memcpy.
+awk 'BEGIN {
+    for(i=1; i<=10; i++) {
+        for(j=1; j<=400; j++) printf "A";
+        printf "\033[D\033[D\177\n";
+    }
+}' > afl_in/oversized.txt
+
+# ---------------------------------------------------------
+# ZIARNO 4: Structural Chaos (Parser i Backspace)
+# ---------------------------------------------------------
+awk 'BEGIN {
+    for(i=1; i<=20; i++) printf "echo \\\"test\\\"\177\177\177\177\033[A\n";
+}' > afl_in/structural_chaos.txt
+
+
+echo "[*] Uruchamianie AFL++ (Prawdziwy Fuzzing)..."
+# Mniejsze pliki pozwolą na błyskawiczne mutacje
+AFL_SKIP_CPUFREQ=1 afl-fuzz -i - -o afl_out -M main -x term.dict -- ./fuzzer_bin
