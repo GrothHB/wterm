@@ -1,5 +1,5 @@
 CFLAGS = -Wall -Wextra -pedantic -g
-COMP = gcc
+COMP = clang
 SRCS = sterm.c test.c sparse.c compatb.c test2.c test3.c
 OBJS = ${SRCS:.c=.o}
 

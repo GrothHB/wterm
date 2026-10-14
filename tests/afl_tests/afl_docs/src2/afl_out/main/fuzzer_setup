@@ -1,7 +1,0 @@
-# environment variables:
-AFL_CUSTOM_INFO_PROGRAM=./fuzzer_bin
-AFL_CUSTOM_INFO_PROGRAM_ARGV=
-AFL_CUSTOM_INFO_OUT=afl_out/main
-AFL_SKIP_CPUFREQ=1
-# command line:
-'afl-fuzz' '-i' 'afl_in' '-o' 'afl_out' '-x' 'term.dict' '-c' './fuzzer_bin' '-M' 'main' '--' './fuzzer_bin'
