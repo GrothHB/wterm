@@ -15,10 +15,18 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <time.h>
+#include <assert.h>
 #include "keytable.h"
 #include "tab.h"
 #include "my_term.h"
 #include "sterm.h"
+#ifdef __AFL_COMPILER
+#include "create_chaos.h"
+#define malloc rand_memory_assign
+#define strdup rand_duplicate_of_string
+#define getcwd rand_answer_for_path
+#define write(fd, buf, count) afl_mock_write(fd, buf, count)
+#endif
 
 #define ESC '\033'
 #define DEL '\177'
@@ -28,6 +36,10 @@
 #define PS2_SIZE 1
 #define BURN_N_REBUILD_MAX \
 (MAX_CANON + ((MAX_CANON) / (OPENBSD_MAX - 65) * 5 + 32))
+#define COMMAND_IDX_REACH(x) ((x) >= 0 && (x) <= MAX_CANON + 1)
+#define SCREEN_COND ( pk->screen_limit > 0 && l_col > 0 && l_col <= \
+		      OPENBSD_MAX && pk->screen_limit <= \
+		      OPENBSD_MAX - strlen(pk->ps) )
 
 static volatile sig_atomic_t term_sig = 0;
 #ifndef TEST
@@ -64,6 +76,7 @@ main(void)
 	header.com.idx = 0;
 	header.com.max_hst_num = 0;
 	header.hst_num = 0;
+	command[0] = '\0';
 	header.com.command = command;
 	header.history = command_history;
 	header.rvs_search_hst_max_prt = 10;
@@ -96,6 +109,7 @@ main(void)
 			header.ps[ps_size] = '\0';
 		}
 	}
+	assert(header.ps != NULL);
 	set_screen_limit(&header);
 
 	write(STDOUT_FILENO, header.ps, strlen(header.ps));
@@ -129,6 +143,7 @@ main(void)
 		c = afl_buf[afl_pos++];
 		if (c & (1 << 7))
 			continue;
+		assert(c >= 0);
 		ascii[c](c, &header);
 		#endif
 	}
@@ -152,6 +167,7 @@ hcntl(struct cpkg *pk)
 		if (rbp == 0)
 			break;
 		--rbp;
+		assert(COMMAND_IDX_REACH(pk->com.idx));
 		prev_curs = pk->com.idx;
 		push_command(rbp, pk);
 		burn_n_rebuild(pk, HISTORY, prev_curs);
@@ -160,6 +176,7 @@ hcntl(struct cpkg *pk)
 		if (rbp == rsp) 
 			break;
 		++rbp;
+		assert(COMMAND_IDX_REACH(pk->com.idx));
 		prev_curs = pk->com.idx;
 		push_command(rbp, pk);
 		burn_n_rebuild(pk, HISTORY, prev_curs);
@@ -182,20 +199,25 @@ hcntl(struct cpkg *pk)
 void
 disp_stream(char c, struct cpkg *pk)
 {
-	if (pk->com.idx == MAX_CANON)
+	if (pk->com.idx >= MAX_CANON)
 		return;
 	if (pk->curs != pk->com.idx) {
 		char 		*src, *dst;
 		size_t size = pk->com.idx - pk->curs + 1;
+		assert(COMMAND_IDX_REACH(pk->curs));
 		dst = &pk->com.command[pk->curs + 1];
 		src = &pk->com.command[pk->curs];
+		assert(size + 1 <= MAX_CANON && size > 0);
 		memmove(dst, src, size);
 		pk->com.command[pk->curs] = c;
+		assert(COMMAND_IDX_REACH(pk->com.idx));
 		id_shift(ID_RIGHT, pk);
 		burn_n_rebuild(pk, INLINE_ADD, 0);
 		cursor_cntl(QR, pk);
 	} else {
 		assigne(c, pk);
+		assert(COMMAND_IDX_REACH(pk->curs));
+		assert(COMMAND_IDX_REACH(pk->com.idx));
 		id_shift(ID_RIGHT, pk);
 		cursor_cntl(M_RIGHT, pk);
 	}
@@ -245,11 +267,13 @@ cans(char c, struct cpkg *pk)
 	(void)c;
 	if (pk->curs != 0) {
 		char 		*dst, *src;
+		assert(COMMAND_IDX_REACH(pk->curs));
 		size_t size = pk->com.idx - pk->curs + 1;
 		old_curs = pk->curs;
 		cursor_cntl(M_LEFT, pk);
 		dst = &pk->com.command[pk->curs];
 		src = &pk->com.command[pk->curs + 1];
+		assert(size + 1 <= MAX_CANON && size > 0);
 		memmove(dst, src, size);
 		id_shift(ID_LEFT, pk);
 		if (pk->curs == pk->com.idx)
@@ -291,6 +315,7 @@ parse_esc_com(char c, struct cpkg *pk)
 	case 'A':
 		if (pk->tptr[LF] == rvs_search_mode)
 			break;
+		assert(COMMAND_IDX_REACH(pk->curs));
 		if (pk->com.idx == pk->curs) {
 			pk->flag = UP;
 			hcntl(pk);
@@ -299,6 +324,7 @@ parse_esc_com(char c, struct cpkg *pk)
 	case 'B':
 		if (pk->tptr[LF] == rvs_search_mode)
 			break;
+		assert(COMMAND_IDX_REACH(pk->curs));
 		if (pk->com.idx == pk->curs) {
 			pk->flag = DOWN;
 			hcntl(pk);
@@ -320,15 +346,18 @@ cursor_cntl(enum cursmov action, struct cpkg *pk)
 {
 	switch (action) {
 	case M_LEFT:
+		assert(COMMAND_IDX_REACH(pk->curs));
 		if (pk->curs > 0)
 			--pk->curs;
 		break;
 	case M_RIGHT:
+		assert(COMMAND_IDX_REACH(pk->curs));
 		if (pk->curs == pk->com.idx)
 			break;
 		pk->curs++;
 		break;
 	case QL:
+		assert(COMMAND_IDX_REACH(pk->curs));
 		if (pk->curs > 0) {
 			if (pk->curs % pk->screen_limit == 0 &&
 			    pk->curs > 0) {
@@ -341,6 +370,7 @@ cursor_cntl(enum cursmov action, struct cpkg *pk)
 		}
 		break;
 	case QR:
+		assert(COMMAND_IDX_REACH(pk->curs));
 		if (pk->curs == pk->com.idx)
 			break;
 		++pk->curs;
@@ -359,11 +389,13 @@ id_shift(enum sid s, struct cpkg *pk)
 {
 	switch (s) {
 	case ID_RIGHT:
-		if (pk->com.idx == MAX_CANON)
+		assert(COMMAND_IDX_REACH(pk->com.idx));
+		if (pk->com.idx >= MAX_CANON)
 			break;
 		++pk->com.idx;
 		break;
 	case ID_LEFT:
+		assert(COMMAND_IDX_REACH(pk->com.idx));
 		if (pk->com.idx == 0)
 			break;
 		pk->com.idx--;
@@ -374,6 +406,7 @@ id_shift(enum sid s, struct cpkg *pk)
 void
 assigne(char c, struct cpkg *pk)
 {
+	assert(COMMAND_IDX_REACH(pk->com.idx));
 	pk->com.command[pk->com.idx]  = c;
 	pk->com.command[pk->com.idx + 1] = '\0';
 	write(STDOUT_FILENO, &c, 1);
@@ -386,7 +419,9 @@ push_memory(int *rsp, struct cpkg *pk)
 {
 	int 		len;
 	char 		*ptr;
+	assert(COMMAND_IDX_REACH(pk->com.idx));
 	len = strlen(pk->com.command);
+	assert(len <= MAX_CANON);
 	if ((ptr = malloc(len + 1)) == NULL)
 		return;
 	
@@ -406,17 +441,21 @@ push_memory(int *rsp, struct cpkg *pk)
 void
 push_command(int rbp, struct cpkg *pk)
 {
-	size_t 		size;
+	size_t 		copied;
+	assert(rbp >= 0 && rbp <= HISTORY_MAX_SIZE);
 	if (pk->history[rbp] == NULL) {
 		pk->com.command[0] = '\0';
 		pk->com.idx = 0;
 		pk->curs = 0;
 		return;
 	}
-	size = strlen(pk->history[rbp]);
-	strlcpy(pk->com.command, pk->history[rbp], size + 1);
+	assert(COMMAND_IDX_REACH(size + 1));
+	copied = strlcpy(pk->com.command, pk->history[rbp], MAX_CANON + 1);
+	if (copied > MAX_CANON)
+		copied = MAX_CANON;
 	pk->com.command[size] = '\0';
-	pk->com.idx = size;
+	assert(COMMAND_IDX_REACH(pk->com.idx));
+	pk->com.idx = copied;
 	pk->curs = pk->com.idx;
 }
 
@@ -427,6 +466,7 @@ set_cursor(int position, struct cpkg *pk)
 	int 		len;
 	position %= pk->screen_limit;
 	position += strlen(pk->ps);
+	assert(COMMAND_IDX_REACH(position) && position != 0);
 	len = snprintf(max_mov, sizeof(max_mov), "\r\033[%dC", position);
 	write(STDOUT_FILENO, max_mov, len);
 }
@@ -436,39 +476,28 @@ clear_comm(char c, struct cpkg *pk)
 {
 	int 		len, slide, linep;
 	char 		buf[32];
-	size_t		pssize;
+	size_t		copied;
 	(void)c;
 	pk->flag = SAVE;
 	hcntl(pk);
 	pk->flag = CLEAR;
 	hcntl(pk);
+	assert(COMMAND_IDX_REACH(pk->com.idx));
 	linep = (pk->com.idx > 0) ? ((pk->com.idx - 1) / pk->screen_limit): 0;
+	assert(COMMAND_IDX_REACH(pk->curs));
 	slide = linep - (pk->curs / pk->screen_limit);
 	if (slide) {
 		len = snprintf(buf, sizeof(buf), "\033[%dB\n\r", slide);
-		pssize = strlen(pk->ps);
-		strlcpy(&buf[len], pk->ps, pssize + 1);
-		write(STDOUT_FILENO, buf, len + pssize);
+		copied = strlcpy(&buf[len], pk->ps, sizeof(buf) - len);
+		assert(sizeof(buf) >= len + copied);
+		write(STDOUT_FILENO, buf, len + copied);
 	} else {
 		len = snprintf(buf, sizeof(buf), "\n\r%s", pk->ps);
-		write(STDOUT_FILENO, buf, strlen(buf));
+		write(STDOUT_FILENO, buf, len);
 	}
 	pk->curs = 0;
 	pk->com.idx = 0;
 	pk->com.command[0] = '\0';
-}
-
-void
-clear_page(struct cpkg *pk)
-{
-	const char 	erease_one_up[] = "\r\033[K\033[A";
-	const char 	clean[] = "\033[K";
-	int 		iter, times;
-	int len_er_one_up = strlen(erease_one_up);
-	times = pk->com.idx / pk->screen_limit;
-	for (iter = 0; iter < times; ++iter)
-		write(STDOUT_FILENO, erease_one_up, len_er_one_up);
-	write(STDOUT_FILENO, clean, 3);
 }
 
 void
@@ -484,10 +513,12 @@ void
 burn_n_rebuild(struct cpkg *pk, enum rebuild state, int old_curs)
 {
 	char 		buffer[BURN_N_REBUILD_MAX];
-	size_t 		len, bsize, pssize;
+	size_t 		len, bsize, copied;
 	int 		y, iter, cl;
 	cl = y = len = 0;
 	bsize = sizeof(buffer);
+	assert(COMMAND_IDX_REACH(pk->curs));
+	assert(COMMAND_IDX_REACH(pk->com.idx));
 	if (state == INLINE_CANS) {
 		int 	linep;
 		y = pk->curs / pk->screen_limit;
@@ -512,16 +543,17 @@ burn_n_rebuild(struct cpkg *pk, enum rebuild state, int old_curs)
 		len = snprintf(buffer, bsize, "\033[%dA\r\033[J", y);
 	else if (state != TERM_RB)
 		len = snprintf(buffer, bsize, "\r\033[J");
-	pssize = strlen(pk->ps);
-	strlcpy(&buffer[len], pk->ps, pssize + 1);
-	len += pssize;
+	copied = strlcpy(&buffer[len], pk->ps, bsize - len);
+	assert(copied + len <= bsize);
+	len += copied;
 	for (iter = 0; iter < pk->com.idx; ++iter) {
 		if (iter % pk->screen_limit == 0 && iter > 0) {
+			assert(len + copied + 4 < bsize);
 			int 		it;
 			buffer[len++] = '\n';
 			buffer[len++] = '\r';
 			buffer[len++] = '>';
-			for (it = 0; it < (int)strlen(pk->ps) - 1; ++it)
+			for (it = 0; it < copied - 1; ++it)
 				buffer[len++] = ' ';
 		}
 		buffer[len++] = pk->com.command[iter];
@@ -555,6 +587,7 @@ find_fill(char c, struct cpkg *pk)
 	xf = i = flag = 0;
 	dummy = NULL;
 	sword = parse(pk);
+	assert(COMMAND_IDX_REACH(pk->curs));
 	sofw = pk->curs - sword.sidx;
 	if (sofw > MAX_CANON)
 		sofw = MAX_CANON;
@@ -694,10 +727,13 @@ shift_n_fill(struct cpkg *pk, int sofw, char *dummy, struct word_t sword)
 	fwh = 1;
 	if (dummy == NULL || strcmp(dummy, "NOTF") == 0)
 		return;
+	assert(COMMAND_IDX_REACH(pk->curs));
+	assert(COMMAND_IDX_REACH(pk->com.idx));
 	if (pk->curs != pk->com.idx || sword.type == DIRECT ||
 		pk->fill == CLOSE_FILL) {
 		fwh = 0;
 		pk->fill = ADD_SPACE;
+		assert(COMMAND_IDX_REACH(pk->com.idx));
 		if (pk->com.idx + (strlen(dummy) - sofw) > MAX_CANON) {
 			free(dummy);
 			dummy = NULL;
@@ -713,6 +749,7 @@ shift_n_fill(struct cpkg *pk, int sofw, char *dummy, struct word_t sword)
 	src = &pk->com.command[pk->curs];
 	dst = &pk->com.command[pk->curs + ntm];
 	size = pk->com.idx - pk->curs;
+	assert(size + 1 <= MAX_CANON);
 	memmove(dst, src, size + 1);
 	memcpy(&pk->com.command[sword.sidx], dummy, len);
 	if (fwh)
@@ -729,6 +766,7 @@ parse_dir(char *form)
 	char		*ptr, *dir, path[PATH_MAX];
 	static char	message[] = "SP"; /* abbriev special path */
 	size_t		len, size;
+	assert(form != NULL);
 	len = strlen(form);
 	if (len < 1)
 		return (NULL);
@@ -839,6 +877,7 @@ set_screen_limit(struct cpkg *pk)
 		}
 	}
 	#endif
+	assert(COMMAND_IDX_REACH(pk->com.idx));
 	if (pk->com.idx == 0) {
 		if (term_size.ws_col >= OPENBSD_MAX) {
 			size_t r = ps_size % OPENBSD_MAX;
@@ -849,12 +888,14 @@ set_screen_limit(struct cpkg *pk)
 			pk->screen_limit = term_size.ws_col - r;
 			l_col = term_size.ws_col;
 		}
+		assert(SCREEN_COND);
 		return;
 	}
 	if (term_size.ws_col >= OPENBSD_MAX && l_col >= OPENBSD_MAX) {
 		pk->screen_limit = OPENBSD_MAX - (ps_size % OPENBSD_MAX);
 		if (!l_screen_limit)
 			l_screen_limit = pk->screen_limit;
+		assert(SCREEN_COND);
 		return;
 	}
 	if (term_size.ws_col >= OPENBSD_MAX) {
@@ -866,6 +907,7 @@ set_screen_limit(struct cpkg *pk)
 	if (term_size.ws_col < l_col) {
 		int		ri;
 		uint8_t		mode1;
+		assert(COMMAND_IDX_REACH(pk->curs));
 		mode1 = ri = 0;
 		for (i = 0; i <= pk->curs; ++i) {
 			size_t 		cond1, cond2;
@@ -888,6 +930,7 @@ set_screen_limit(struct cpkg *pk)
 		}
 		nol += (ps_size / l_col);
 	} else {
+		assert(COMMAND_IDX_REACH(pk->curs));
 		nol = pk->curs / l_screen_limit;
 		nol += ps_size / l_col;
 	}
@@ -903,6 +946,7 @@ set_screen_limit(struct cpkg *pk)
 	else
 		l_col = term_size.ws_col;
 	burn_n_rebuild(pk, TERM_RB, 0);
+	assert(SCREEN_COND);
 }
 
 void

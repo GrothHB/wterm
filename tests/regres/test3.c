@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,13 @@
 #include "openbsd.h"
 #include "sterm.h"
 #include "test3.h"
+#ifdef __AFL_COMPILER
+#include "create_chaos.h"
+#define malloc rand_memory_assign
+#define strdup rand_duplicate_of_string
+#define getcwd rand_answer_for_path
+#define write(fd, buf, count) afl_mock_write(fd, buf, count)
+#endif
 
 #define OPENBSD_MAX 77 /* style(9) 80 column max */
 #define MAX_SIZE_FOR_PRINT (MAX_CANON + (MAX_CANON / OPENBSD_MAX) * \
@@ -33,6 +41,7 @@ search_word(char **hist, char *lw, size_t *nf)
 			continue;
 		}
 		if (c_idx == c_size - 1) {
+			assert(c_size < (SIZE_MAX / 2));
 			c_size *= 2;
 			tmp = reallocarray(sh, c_size, sizeof(char *));
 			if (tmp == NULL) {
@@ -94,6 +103,7 @@ take_command(int indx, struct cpkg *pk)
 	if ((size_t)i >= pk->hst_num)
 		return;
 	wsize = strlen(pk->history[i]);
+	assert(wsize <= MAX_CANON);
 	memcpy(pk->com.command, pk->history[i], wsize + 1);
 	pk->curs = wsize;
 	set_cursor(pk->curs, pk);
@@ -187,6 +197,7 @@ list_commands(int *base, struct cpkg *pk)
 	bsize = sizeof(buf);
 	lines_printed = len = 0;
 	rvs_disp_max = 79 - strlen(pk->ps);
+	assert(rvs_disp_max > 0);
 	while (*base < (int)pk->hst_num) {
 		int 		idx;
 		int hidx = 0;
@@ -291,6 +302,7 @@ paging(struct cpkg *pk, enum lex_paging state, ...)
 		uint8_t 	vl;
 		if (base == 0 || pk->word_search == NULL)
 			return;
+		assert(pk->rvs_search_hst_max_prt > 0);
 		vl = base % pk->rvs_search_hst_max_prt;
 		if (vl) {
 			base = pk->hst_num - vl;

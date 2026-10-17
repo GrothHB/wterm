@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <assert.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
@@ -41,6 +42,7 @@ fcompare(const void *x, const void *y)
 char *
 fill_command(char *word, char *path, enum search_m *fflag)
 {
+	assert(word != NULL && path != NULL && fflag != NULL);
 	char 			sbuf[PIECE_OF_MEM];
 	DIR* 			ptr;
 	struct dirent 		*dir_list;
@@ -70,6 +72,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 	    ws.ws_col < OPENBSD_MAX)
 		scrn_limit = ws.ws_col;
 	while ((dir_list = readdir(ptr)) != NULL) {
+		assert(dir_list->d_name != NULL);
 		if (word[0] != '.')
 			if (dir_list->d_name[0] == '.')
 				continue;
@@ -126,6 +129,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 	inter_size = strlen(farray[0]);
 	for (inter_idx = 0; inter_idx < (max_length - strsize); ++inter_idx) {
 		size_t check_size = strsize + inter_idx;
+		assert(check_size <= strlen(farray[last]));
 		if (farray[last][check_size] ^ *base)
 			break;
 		if (check_size <= inter_size)
@@ -175,6 +179,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 					write(STDOUT_FILENO, sbuf, len);
 					len = 0;
 				}
+				assert(len + chunk + 3 <= bsize);
 				nr = snprintf(&sbuf[len], bsize - len, 
 					      "%.*s\n\r", chunk,
 					      &farray[i][chg]);
@@ -195,6 +200,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 			len = 0;
 			chinl = 0;
 		}
+		assert(len + max_length + 2 < bsize);
 		nr = snprintf(&sbuf[len], bsize - len, "%-*s  ", 
 				(int)max_length, farray[i]);
 		chinl += nr;

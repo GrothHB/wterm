@@ -35,7 +35,6 @@ void                     push_memory(int *, struct cpkg *);
 void                     push_command(int, struct cpkg *);
 void                     set_cursor(int, struct cpkg *);
 void                     clear_comm(char, struct cpkg *);
-void                     clear_page(struct cpkg *);
 void                     break_line(struct cpkg *);
 void                     burn_n_rebuild(struct cpkg *, enum rebuild, int);
 void                     neutral(char, struct cpkg *);
