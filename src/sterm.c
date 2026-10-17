@@ -1,21 +1,21 @@
 #include <sys/types.h>
-
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <string.h>
-#include <limits.h>
-#include <fcntl.h>
-#include <termios.h>
-#include <stdarg.h>
-#include <poll.h>
-#include <signal.h>
 #include <sys/ioctl.h>
-#include <errno.h>
-#include <time.h>
+
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <poll.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <signal.h>
+#include <termios.h>
+#include <time.h>
+#include <unistd.h>
 #include "keytable.h"
 #include "tab.h"
 #include "my_term.h"
@@ -34,56 +34,36 @@
 		      OPENBSD_MAX && pk->screen_limit <= \
 		      OPENBSD_MAX - strlen(pk->ps) )
 
+static void		init_term(struct cpkg *);
+static void 		init_sig(void);
+
 static volatile sig_atomic_t term_sig = 0;
 
 int
 main(void)
 {
-	char 			command[MAX_CANON + 1];
-	struct termios 		raw;
-	struct cpkg 		header;
-	struct pollfd		fds[1];
-	struct sigaction	sa;
-	char 			*command_history[HISTORY_MAX_SIZE + 1], *ptr;
-	void 			(*ascii[128])(char c, struct cpkg *);
-	unsigned char 		c;
-	char			ps[] = "$ ";
-	char			ps1[24];
-	size_t			ps_size;
-	int			timeout;
-	uint8_t			prv_sig;
+	char command[MAX_CANON + 1];
+	char *command_history[HISTORY_MAX_SIZE + 1], *ptr;
+	void (*ascii[128])(char c, struct cpkg *);
+	struct cpkg header;
+	struct pollfd fds[1];
+	char ps[] = "$ ";
+	char ps1[24];
+	size_t ps_size;
+	int timeout;
+	unsigned char c;
 	nfds_t fds_num = 1;
 	timeout = -1;
-	sa.sa_handler = handle_term_inter;
-	sa.sa_flags = prv_sig = 0;
-	sigemptyset(&sa.sa_mask);
-	sigaction(SIGWINCH, &sa, NULL);
 	fds[0].fd = STDIN_FILENO;
 	fds[0].events = POLLIN;
 	/* ascii array is declared in `keytable.h' */
 	init_ascii(ascii);
-	tcgetattr(STDIN_FILENO, &header.base);
-	header.curs = 0;
-	header.com.idx = 0;
-	header.com.max_hst_num = 0;
-	header.hst_num = 0;
-	command[0] = '\0';
 	header.com.command = command;
-	header.history = command_history;
-	header.rvs_search_hst_max_prt = 10;
-	header.flag = SAVE;
-	header.fill = ADD_SPACE;
-	header.tptr = ascii;
-	header.word_search = NULL;
-	header.mode = 0;
 	command_history[0] = NULL;
-	raw = header.base; 
-	cfmakeraw(&raw);
-	/* Setting enter to FL becouse in raw mode
-	 * it is defaulter as CR
-	 */
-	raw.c_iflag |= ICRNL;
-	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+	header.history = command_history;
+	header.tptr = ascii;
+	init_term(&header);
+	init_sig();
 	if ((ptr = getenv("PS1")) == NULL) {
 		header.ps = ps;
 	} else {
@@ -419,7 +399,6 @@ push_command(int rbp, struct cpkg *pk)
 		pk->curs = 0;
 		return;
 	}
-	assert(COMMAND_IDX_REACH(size + 1));
 	copied = strlcpy(pk->com.command, pk->history[rbp], MAX_CANON + 1);
 	if (copied > MAX_CANON)
 		copied = MAX_CANON;
@@ -904,4 +883,38 @@ clear_screen(char c, struct cpkg *pk)
 	(void)c;
 	write(STDOUT_FILENO, "\033[2J\033[H", 7);
 	burn_n_rebuild(pk, TERM_RB, 0);
+}
+
+static void
+init_term(struct cpkg *pk)
+{
+	struct termios raw;
+	tcgetattr(STDIN_FILENO, &pk->base);
+	pk->curs = 0;
+	pk->com.idx = 0;
+	pk->com.max_hst_num = 0;
+	pk->hst_num = 0;
+	pk->com.command[0] = '\0';
+	pk->rvs_search_hst_max_prt = 10;
+	pk->flag = SAVE;
+	pk->fill = ADD_SPACE;
+	pk->word_search = NULL;
+	pk->mode = 0;
+	raw = pk->base; 
+	cfmakeraw(&raw);
+	/* Setting enter to FL becouse in raw mode
+	 * it is defaulter as CR
+	 */
+	raw.c_iflag |= ICRNL;
+	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+}
+
+static void
+init_sig(void)
+{
+	struct sigaction sa;
+	sa.sa_handler = handle_term_inter;
+	sa.sa_flags = 0;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGWINCH, &sa, NULL);
 }

@@ -50,3 +50,5 @@ afl_mock_write(int fd, const void *buf, size_t count)
 	}
 	return count;
 }
+
+

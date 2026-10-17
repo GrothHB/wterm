@@ -1,3 +1,0 @@
-
-afl-clang -fstack-protector-all -ftrivial-auto-var-init=pattern \
-    -O0 -g -Wall -Wextra sterm.c test.c test2.c test3.c sparse.c create_chaos.c -o test_fuzzer_bin || exit 1
