@@ -5,8 +5,6 @@ ver
 afl_reg_tests
 afl_out_klaster
 afl_test
-check_cov
-corpus
 corpus_min
 corpus_min2
 cov_bin
