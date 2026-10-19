@@ -3,7 +3,7 @@
 
 #include "my_term.h"
 #include "sterm.h"
-#include "test3.h"
+#include "rvs_mode.h"
 #define FF 0x0C
 
 void

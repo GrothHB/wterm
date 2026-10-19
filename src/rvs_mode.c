@@ -9,7 +9,8 @@
 #include "my_term.h"
 #include "openbsd.h"
 #include "sterm.h"
-#include "test3.h"
+#include "tab_compl.h"
+#include "rvs_mode.h"
 
 #define OPENBSD_MAX 80 /* style(9) 80 column max */
 #define MAX_SIZE_FOR_PRINT (MAX_CANON + (MAX_CANON / OPENBSD_MAX) * \
@@ -18,8 +19,15 @@
 #define WRONG_EXIT_PAGING INT_MAX
 #define ABORD_ACTION INT_MIN
 
-char **
-search_word(char **hist, char *lw, size_t *nf)
+static char              **search_word(char **, const char *, size_t *);
+static void              list_commands(int *, struct cpkg *);
+static void              paging(struct cpkg *, enum lex_paging, ...);
+static void              rvs_search(int, struct cpkg *);
+static void              rvs_search_back(char, struct cpkg *);
+static void              take_command(int, struct cpkg *);
+
+static char **
+search_word(char **hist, const char *lw, size_t *nf)
 {
 	char		**sh, **tmp;
 	size_t		c_idx, c_size;
@@ -83,7 +91,7 @@ set_vil_mode(void (**ascii)(char, struct cpkg *))
 	(void)**ascii;
 }
 
-void
+static void
 take_command(int indx, struct cpkg *pk)
 {
 	int		i;
@@ -136,8 +144,9 @@ rvs_search_mode(char c, struct cpkg *pk)
 	case 's':
 		if (pk->com.command[i + 1] == 's' &&
 		    pk->com.command[i + 2] == ' ') {
-			char		**tmp, *pt;
-			size_t		*hn;
+			char **tmp;
+			const char *pt;
+			size_t *hn;
 			hn = &pk->hst_num;
 			pt = &pk->com.command[i + 3];
 			if ((tmp = search_word(pk->history, pt, hn)) == NULL)
@@ -180,13 +189,13 @@ rvs_search_mode(char c, struct cpkg *pk)
 	burn_n_rebuild(pk, HISTORY, old_curs);
 }
 
-void
+static void
 list_commands(int *base, struct cpkg *pk)
 {
 	char			buf[MAX_SIZE_FOR_PRINT];
 	size_t			bsize;
 	int 			lines_printed, rvs_disp_max;
-	size_t 			len, cmdlf;
+	size_t 			len;
 	bsize = sizeof(buf);
 	lines_printed = len = 0;
 	rvs_disp_max = 79 - strlen(pk->ps);
@@ -226,6 +235,7 @@ list_commands(int *base, struct cpkg *pk)
 	write(STDOUT_FILENO, buf, len);
 	if (*base < (int)pk->hst_num) {
 		char msg[50];
+		size_t cmdlf;
 		cmdlf = pk->hst_num - (size_t)*base;
 		len = snprintf(msg, 50, "there are %d commands left\n\r",
 			       (int)cmdlf);
@@ -239,7 +249,7 @@ list_commands(int *base, struct cpkg *pk)
 	burn_n_rebuild(pk, HISTORY, 0);
 }
 
-void
+static void
 rvs_search(int base, struct cpkg *pk)
 {
 	char 			word[MAX_CANON + 50], **tmp;
@@ -269,7 +279,7 @@ rvs_search(int base, struct cpkg *pk)
 	}
 }
 
-void
+static void
 rvs_search_back(char c, struct cpkg *pk)
 {
 	if (pk->com.idx == 0)
@@ -278,7 +288,7 @@ rvs_search_back(char c, struct cpkg *pk)
 		disp_stream(c, pk);
 }
 
-void
+static void
 paging(struct cpkg *pk, enum lex_paging state, ...)
 {
 	va_list		ap;
@@ -297,8 +307,10 @@ paging(struct cpkg *pk, enum lex_paging state, ...)
 		list_commands(&base, pk);
 	} else if (state == PAG_HANDLING_BACK) {
 		uint8_t 	vl;
-		if (base == 0 || pk->word_search == NULL)
+		if (base == 0 || pk->word_search == NULL) {
+			va_end(ap);
 			return;
+		}
 		assert(pk->rvs_search_hst_max_prt > 0);
 		vl = base % pk->rvs_search_hst_max_prt;
 		if (vl) {
@@ -306,11 +318,13 @@ paging(struct cpkg *pk, enum lex_paging state, ...)
 			base -= pk->rvs_search_hst_max_prt;
 			base = base < 0? 0: base;
 			list_commands(&base, pk);
+			va_end(ap);
 			return;
 		}
 		base += -2 * pk->rvs_search_hst_max_prt;
 		if (base < 0) {
 			base = 0;
+			va_end(ap);
 			return;
 		}
 		list_commands(&base, pk);

@@ -1,14 +1,9 @@
 CFLAGS = -Wall -Wextra -pedantic -g -DNDEBUG
 COMP = clang
-SRCS = ./src/sterm.c ./src/test.c ./src/sparse.c ./src/compatb.c ./src/test2.c \
-	./src/test3.c
+SRCS = ./src/sterm.c ./src/tab_compl.c ./src/sparse.c ./src/compatb.c ./src/rvs_mode.c
 OBJS = ${SRCS:.c=.o}
 
 CFLAG_OP = 
-.if !empty(.TARGETS:Mansi)
-CFLAG_OP = -ansi
-.endif
-
 .if !empty(.TARGETS:Mdebug)
 DEB = -O0
 .elif !empty(.TARGETS:Mopt)
@@ -25,7 +20,6 @@ OSIZE = -Os
 
 .c:
 	$(COMP) $(CFLAGS) $(CFLAG_OP) $(DEB) $(OPT) $(STEST) $(OSIZE) -o $@ $<
-ansi: wt
 optsize: wt
 debug:
 	@:
@@ -35,6 +29,8 @@ wt: $(OBJS)
 	$(COMP) $(CFLAGS) $(OPT) $(DEB) $(CFLAG_OP) $(STEST) $(OSIZE) -o $@ $(OBJS)
 .c.o:
 	$(COMP) $(CFLAGS) $(OPT) $(DEB) $(CFLAG_OP) $(STEST) $(OSIZE) -c -o $@ $<
-
+check:
+	cppcheck --enable=all --inconclusive --std=c89 --suppress=missingIncludeSystem --error-exitcode=1 \
+	--suppress=funcArgNamesDifferentUnnamed  --check-level=exhaustive -i src/vi_edit.c src/
 clean:
 	rm ./src/*.o

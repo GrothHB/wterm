@@ -2,6 +2,7 @@
 #define _DEFAULT_SOURCE
 #define _ISOC99_SOURCE
 
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -14,14 +15,16 @@
 #include <err.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
 #include "my_term.h"
-#include "tab.h"
+#include "tab_compl.h"
 
 #define OPENBSD_MAX 80
 #define PIECE_OF_MEM 2048
 
-int
+static int               fcompare(const void *, const void *);
+static int               message(int);
+
+static int
 message(int nf)
 {
 	char buffer[50], c;
@@ -37,29 +40,32 @@ message(int nf)
 	return (1);
 }
 
-int
+static int
 fcompare(const void *x, const void *y)
 {
 	return (strcmp(*(char **)x, *(char **)y));
 }
 
 char *
-fill_command(char *word, char *path, enum search_m *fflag)
+fill_command(const char *word, char *path, enum search_m *fflag)
 {
+	size_t c_size, c_index, i, bsize, len, strsize, chinl;
+	size_t max_length, mflag, inter_idx, inter_size, last;
+	char **farray, **tmp, *t, *fw;
+	char sbuf[PIECE_OF_MEM];
+	struct dirent *dir_list;
+	uint8_t	scrn_limit;
+	struct winsize ws;
+	struct stat btyp;
+	const char *base;
+	DIR* ptr;
+	int fst;
+
+	static char retmulti[] = "MF";
+	static char not_disp[] = "TM";
+	static char ret[] = "NOTF";
+
 	assert(word != NULL && path != NULL && fflag != NULL);
-	char 			sbuf[PIECE_OF_MEM];
-	DIR* 			ptr;
-	struct dirent 		*dir_list;
-	struct stat 		btyp;
-	struct winsize		ws;
-	char 			**farray, **tmp, *t, *base, *fw;
-	static char		ret[] = "NOTF";
-	static char		retmulti[] = "MF";
-	static char		not_disp[] = "TM";
-	size_t 			c_size, c_index, i, bsize, len, strsize, chinl;
-	size_t 			max_length, mflag, inter_idx, inter_size, last;
-	int			fst;
-	uint8_t			scrn_limit;
 	bsize = sizeof(sbuf);
 	c_index = max_length = mflag = inter_idx = 0;
 	c_size = 1;
@@ -219,6 +225,7 @@ fill_command(char *word, char *path, enum search_m *fflag)
 	free(farray);
 	farray = NULL;
 	closedir(ptr);
+	*fflag = ADD_SPACE;
 	return (retmulti);
 clean:
 	for (i = 0; i < c_index; ++i)
@@ -229,5 +236,57 @@ clean:
 		return (fw);
 	if (mflag)
 		return (not_disp);
+	return (NULL);
+}
+
+
+char **
+exec_paths(int *npaths)
+{
+	char 		**stable, **fsd, *path, *pol;
+	size_t 		npath, i, lidx, c_size, lpath;
+	assert(npaths != NULL);
+	size_t size = sizeof(char *);
+	lidx = npath = 0;
+	c_size = 16;
+	if ((fsd = malloc(c_size * size)) == NULL)
+		return (NULL);
+	stable = fsd;
+	if ((pol= getenv("PATH")) == NULL)
+		goto precleanup;
+	if ((path = strdup(pol)) == NULL)
+		goto precleanup;
+	lpath = strlen(path) + 1;
+	for (i = 0; i < lpath; ++i) {
+		if (npath == c_size - 1) {
+			char **p = stable;
+			assert(c_size < (SIZE_MAX / 2));
+			c_size *= 2;
+			if ((fsd = reallocarray(p, c_size, size)) == NULL)
+				goto clean;
+			stable = fsd;
+		}
+		if (path[i] == ':' || path[i] == '\0') {
+			assert(i >= lidx);
+			size_t size = i - lidx;
+			assert(npath < c_size - 1);
+			if ((stable[npath] = malloc(size + 1)) == NULL)
+				return (NULL);
+			strlcpy(stable[npath++], &path[lidx], size + 1);
+			stable[npath] = NULL;
+			lidx = i + 1;
+		}
+	}
+	*npaths = npath;
+	free(path);
+	return (stable);
+clean:
+	for (i = 0; i < npath; ++i)
+		free(stable[i]);
+	free(path);
+	free(stable);
+	return (NULL);
+precleanup:
+	free(stable);
 	return (NULL);
 }

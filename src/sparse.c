@@ -4,7 +4,7 @@
 #include <string.h>
 #include <limits.h>
 #include "my_term.h"
-#include "tab.h"
+#include "sparse.h"
 
 #define COMMAND_IDX_REACH(x) ((x) >= 0 && (x) <= MAX_CANON + 1)
 
@@ -14,12 +14,12 @@ parse(struct cpkg *pk)
 	int 		i, wflag;
 	enum lex_state	state, prev_state;
 	struct word_t 	lw;
-	char 		c;
 	lw.type = EXEC;
 	lw.sidx = wflag = 0;
 	state = LEX_NORMAL;
 	assert(COMMAND_IDX_REACH(pk->curs));
 	for (i = 0; i < pk->curs; ++i) {
+		char c;
 		c = pk->com.command[i];
 		switch (state) {
 		case LEX_NORMAL:
