@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -20,8 +21,10 @@
 #include <time.h>
 #include <unistd.h>
 #include "keytable.h"
-#include "tab.h"
+#include "tab_compl.h"
 #include "my_term.h"
+#include "sparse.h"
+#include "rvs_mode.h"
 #include "sterm.h"
 
 #define ESC '\033'
@@ -38,9 +41,25 @@
 		      OPENBSD_MAX && pk->screen_limit <= \
 		      OPENBSD_MAX - strlen(pk->ps) )
 
+static char              *parse_dir(char *);
+static void              assigne(char, struct cpkg *);
+static void              break_line(const struct cpkg *);
+static void              clear_mem(struct cpkg *);
+static void              cursor_cntl(enum cursmov, struct cpkg *);
+static void              handle_term_inter(int);
+static void              hcntl(struct cpkg *);
+static void              id_shift(enum sid, struct cpkg *);
+static void              init_sig(void);
+static void              init_term(struct cpkg *);
+static void              parse_esc_com(char, struct cpkg *);
+static void              push_command(int, struct cpkg *);
+static void              push_memory(int *, struct cpkg *);
+static void              set_screen_limit(struct cpkg *);
+static void              shift_n_fill(struct cpkg *, int, char *, struct word_t);
 static void		init_term(struct cpkg *);
 static void 		init_sig(void);
 
+extern char **environ;
 static volatile sig_atomic_t term_sig = 0;
 
 int
@@ -53,7 +72,6 @@ main(void)
 	struct pollfd fds[1];
 	char ps[] = "$ ";
 	char ps1[24];
-	size_t ps_size;
 	int timeout;
 	unsigned char c;
 	nfds_t fds_num = 1;
@@ -71,6 +89,7 @@ main(void)
 	if ((ptr = getenv("PS1")) == NULL) {
 		header.ps = ps;
 	} else {
+		size_t ps_size;
 		ps_size = strlen(ptr);
 		if (ps_size > 21) {
 			header.ps = ps;
@@ -88,12 +107,6 @@ main(void)
 	write(STDOUT_FILENO, header.ps, strlen(header.ps));
 
 	while (1) {
-		#ifdef __AFL_COMPILER
-		static uint8_t tn = 0;
-		++tn;
-		if (tn % 14 == 0)
-			term_sig = 1;
-		#endif
 		if (term_sig == 1) {
 			term_sig = 0;
 			set_screen_limit(&header);
@@ -114,7 +127,7 @@ main(void)
 	return (0);
 }
 
-void
+static void
 hcntl(struct cpkg *pk)
 {
 	int 		prev_curs;
@@ -185,14 +198,13 @@ void
 spec(char c, struct cpkg *pk)
 {
 	static int time_period = -1;
-	char 			sc[16];
-	struct pollfd		fds;
+	struct pollfd fds;
 	nfds_t nfds = 1;
 	fds.fd = STDIN_FILENO;
 	fds.events = POLLIN;
 	(void)c;
 	if (time_period == -1) {
-		char		*t;
+		const char *t;
 		if ((t = getenv("MY_KEYTIMEP")) != NULL) {
 			char *endptr;
 			int val = strtol(t, &endptr, 0);
@@ -211,6 +223,7 @@ spec(char c, struct cpkg *pk)
 			set_vil_mode(pk->tptr);
 	} else {
 		if (fds.revents & POLLIN) {
+			char sc[16];
 			ssize_t nc = read(STDIN_FILENO, sc, sizeof(sc));
 			if (2 == nc && sc[0] == '[')
 				parse_esc_com(sc[1], pk);
@@ -221,10 +234,10 @@ spec(char c, struct cpkg *pk)
 void
 cans(char c, struct cpkg *pk)
 {
-	int 		old_curs;
 	(void)c;
 	if (pk->curs != 0) {
-		char 		*dst, *src;
+		char *dst, *src;
+		int old_curs;
 		assert(COMMAND_IDX_REACH(pk->curs));
 		size_t size = pk->com.idx - pk->curs + 1;
 		old_curs = pk->curs;
@@ -251,7 +264,7 @@ check_break(char c, struct cpkg *pk)
 	exit(2);
 }
 
-void
+static void
 clear_mem(struct cpkg *pk)
 {
 	int i = 0;
@@ -262,7 +275,7 @@ clear_mem(struct cpkg *pk)
 	}
 }
 
-void
+static void
 parse_esc_com(char c, struct cpkg *pk)
 {
 	if (c < 0)
@@ -299,7 +312,7 @@ parse_esc_com(char c, struct cpkg *pk)
 	}
 }
 
-void
+static void
 cursor_cntl(enum cursmov action, struct cpkg *pk)
 {
 	switch (action) {
@@ -317,8 +330,7 @@ cursor_cntl(enum cursmov action, struct cpkg *pk)
 	case QL:
 		assert(COMMAND_IDX_REACH(pk->curs));
 		if (pk->curs > 0) {
-			if (pk->curs % pk->screen_limit == 0 &&
-			    pk->curs > 0) {
+			if (pk->curs % pk->screen_limit == 0) {
 				write(STDOUT_FILENO, "\033[A", 3);
 				set_cursor(--pk->curs, pk);
 				break;
@@ -342,7 +354,7 @@ cursor_cntl(enum cursmov action, struct cpkg *pk)
 	}
 }
 
-void
+static void
 id_shift(enum sid s, struct cpkg *pk)
 {
 	switch (s) {
@@ -361,7 +373,7 @@ id_shift(enum sid s, struct cpkg *pk)
 	}
 }
 
-void
+static void
 assigne(char c, struct cpkg *pk)
 {
 	assert(COMMAND_IDX_REACH(pk->com.idx));
@@ -372,7 +384,7 @@ assigne(char c, struct cpkg *pk)
 		break_line(pk);
 }
 
-void
+static void
 push_memory(int *rsp, struct cpkg *pk)
 {
 	int 		len;
@@ -396,7 +408,7 @@ push_memory(int *rsp, struct cpkg *pk)
 	}
 }
 
-void
+static void
 push_command(int rbp, struct cpkg *pk)
 {
 	size_t 		copied;
@@ -416,7 +428,7 @@ push_command(int rbp, struct cpkg *pk)
 }
 
 void
-set_cursor(int position, struct cpkg *pk)
+set_cursor(int position, const struct cpkg *pk)
 {
 	char 		max_mov[16];
 	int 		len;
@@ -430,9 +442,13 @@ set_cursor(int position, struct cpkg *pk)
 void
 clear_comm(char c, struct cpkg *pk)
 {
-	int 		len, slide, linep;
-	char 		buf[32];
-	size_t		copied;
+	const char er_msg[] = "wt: failed to execute shall command";
+	char buf[32], *shell;
+	struct termios raw;
+	int len, slide, linep, wstatus;
+	size_t copied;
+	pid_t shell_id;
+	copied = -1;
 	(void)c;
 	pk->flag = SAVE;
 	hcntl(pk);
@@ -444,20 +460,63 @@ clear_comm(char c, struct cpkg *pk)
 	slide = linep - (pk->curs / pk->screen_limit);
 	if (slide) {
 		len = snprintf(buf, sizeof(buf), "\033[%dB\n\r", slide);
-		copied = strlcpy(&buf[len], pk->ps, sizeof(buf) - len);
-		assert(sizeof(buf) >= len + copied);
-		write(STDOUT_FILENO, buf, len + copied);
+		/*copied = strlcpy(&buf[len], pk->ps, sizeof(buf) - len);*/
+		assert(sizeof(buf) >= len /*+ copied*/);
+		write(STDOUT_FILENO, buf, len /* + copied */);
 	} else {
-		len = snprintf(buf, sizeof(buf), "\n\r%s", pk->ps);
-		write(STDOUT_FILENO, buf, len);
+		/*len = snprintf(buf, sizeof(buf), "\n\r%s", pk->ps);
+		write(STDOUT_FILENO, buf, len);*/
+		write(STDOUT_FILENO, "\n\r", 2);
 	}
+	if ((shell = getenv("SHELL")) == NULL)
+		shell = "/bin/sh";
+	tcgetattr(STDIN_FILENO, &raw);
+	tcsetattr(STDIN_FILENO, TCSANOW, &pk->base);
+	shell_id = fork();
+	if (shell_id == 0) {
+		char *args[] = {
+			shell,
+			"-c",
+			pk->com.command,
+			NULL
+		};
+		if (execve(shell, args, environ) == -1)
+			_exit(127);
+	} else if (shell_id > 0) {
+		pid_t winf;
+		do
+			winf = waitpid(shell_id, &wstatus, WUNTRACED);
+		while (winf == -1 && errno == EINTR);
+		if (winf >= 0 && WIFEXITED(wstatus)) {
+			int ex = WEXITSTATUS(wstatus);
+			if (ex == 127) {
+				char msg[200];
+				size_t msgl;
+				msgl = snprintf(msg, sizeof(msg), "\r\033[J%s\n\r%s",
+						er_msg, pk->ps);
+				write(STDOUT_FILENO, msg, msgl);
+			} else {
+				char msg[200];
+				len = snprintf(msg, sizeof(msg), "\r%s", pk->ps);
+				write(STDOUT_FILENO, msg, len);
+			}
+		}
+	} else {
+		const char fork_er[] = "wt: couldnt create child process";
+		char msg[200];
+		size_t msgl;
+		msgl = snprintf(msg, sizeof(msg), "\r\033[J%s\n\r%s", fork_er,
+				pk->ps);
+		write(STDOUT_FILENO, msg, msgl);
+	}
+	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
 	pk->curs = 0;
 	pk->com.idx = 0;
 	pk->com.command[0] = '\0';
 }
 
-void
-break_line(struct cpkg *pk)
+static void
+break_line(const struct cpkg *pk)
 {
 	char 		buf[50];
 	size_t		len;
@@ -684,7 +743,7 @@ find_fill(char c, struct cpkg *pk)
 	burn_n_rebuild(pk, HISTORY, 0);
 }
 
-void
+static void
 shift_n_fill(struct cpkg *pk, int sofw, char *dummy, struct word_t sword)
 {
 	int		ntm, fwh;
@@ -695,17 +754,13 @@ shift_n_fill(struct cpkg *pk, int sofw, char *dummy, struct word_t sword)
 		return;
 	assert(COMMAND_IDX_REACH(pk->curs));
 	assert(COMMAND_IDX_REACH(pk->com.idx));
-	if (pk->curs != pk->com.idx || sword.type == DIRECT ||
-		pk->fill == CLOSE_FILL) {
+	if (pk->curs != pk->com.idx || pk->fill == CLOSE_FILL ||
+		dummy[strlen(dummy) - 1] == '/') {
 		fwh = 0;
 		pk->fill = ADD_SPACE;
 		assert(COMMAND_IDX_REACH(pk->com.idx));
-		if (pk->com.idx + (strlen(dummy) - sofw) > MAX_CANON) {
-			free(dummy);
-			dummy = NULL;
-			return;
-		}
-	} else if (pk->com.idx + (strlen(dummy) - sofw) + 1 > MAX_CANON) {
+	}
+	if (pk->com.idx + (strlen(dummy) - sofw) + fwh > MAX_CANON) {
 		free(dummy);
 		dummy = NULL;
 		return;
@@ -726,7 +781,7 @@ shift_n_fill(struct cpkg *pk, int sofw, char *dummy, struct word_t sword)
 	dummy = NULL;
 }
 
-char *
+static char *
 parse_dir(char *form)
 {
 	char		*ptr, *dir, path[PATH_MAX];
@@ -777,13 +832,13 @@ parse_dir(char *form)
 	return (message);
 }
 
-void
+static void
 set_screen_limit(struct cpkg *pk)
 {
-	char			buf[30];
-	struct winsize		term_size;
-	size_t			ps_size, bsize, len;
-	int			i, nol;
+	struct winsize term_size;
+	size_t ps_size, bsize, len;
+	char buf[30];
+	int nol;
 	static uint8_t l_col = 0;
 	static uint8_t l_screen_limit = 0;
 	nol = 0;
@@ -844,8 +899,8 @@ set_screen_limit(struct cpkg *pk)
 		pk->screen_limit = term_size.ws_col - r;
 	}
 	if (term_size.ws_col < l_col) {
-		int		ri;
-		uint8_t		mode1;
+		int ri, i;
+		uint8_t	mode1;
 		assert(COMMAND_IDX_REACH(pk->curs));
 		mode1 = ri = 0;
 		for (i = 0; i <= pk->curs; ++i) {
@@ -888,7 +943,7 @@ set_screen_limit(struct cpkg *pk)
 	assert(SCREEN_COND);
 }
 
-void
+static void
 handle_term_inter(int c)
 {
 	(void)c;

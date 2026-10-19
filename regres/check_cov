@@ -1,13 +1,11 @@
 gcc -O0 -g --coverage -D__AFL_COMPILER redef.c ../src/test.c ../src/test2.c ../src/test3.c \
 	create_chaos.c ../src/sparse.c -o cov_bin
 
-for file in ./corpus_min2/id*; do
+for file in ./corpus/id*; do
 	./cov_bin < "$file" > /dev/null 2>&1
 done
 
 gcov redef.c ../src/test.c ../src/test2.c ../src/test3.c ../src/sparse.c > /dev/null 2>&1
 
 gcov *.gcno > doc.txt
-awk '{ if (/%/) { split($2, pre_val, ":"); val[i++] = pre_val[1]; } }END { printf "%d oraz %s\n", i, pre_val[0] }' doc.txt
-
-rm *.gcno *.gcda *.gcov
+rm *.gcno *.gcda *.gcov cov_bin

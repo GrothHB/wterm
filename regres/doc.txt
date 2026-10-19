@@ -1,5 +1,5 @@
 File 'create_chaos.c'
-Lines executed:100.00% of 27
+Lines executed:71.11% of 45
 Creating 'create_chaos.c.gcov'
 
 File '../src/sterm.c'
@@ -27,7 +27,7 @@ Lines executed:54.76% of 42
 Creating 'test2.c.gcov'
 
 File '../src/test3.c'
-Lines executed:96.83% of 221
+Lines executed:96.88% of 224
 Creating 'test3.c.gcov'
 
-Lines executed:87.46% of 1212
+Lines executed:86.62% of 1233
