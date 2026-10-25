@@ -25,6 +25,11 @@ PROMPT OPTIONS:
         program won't truncate it, but will set the prompt to `$' instead.
 
 UTILITIES:
+	KEYBINDINGS:
+		The following control characters are natively handled:
+		Ctrl+L      Clears the terminal screen (Form Feed).
+		Ctrl+R      Toggles the Reverse Search mode.
+		Tab         Invokes the completion mechanism.
 
         HISTORY SEARCH:
                 History search is controlled by the up and down arrows. It displays
@@ -76,3 +81,37 @@ UTILITIES:
 			It takes the command which corresponds to the number n from the 
 			history, puts it as the current command, and turns off reverse 
 			search mode.
+
+TECHNICAL NOTES
+        Terminal Window Scaling:
+                The program dynamically queries terminal dimensions via the
+                TIOCGWINSZ ioctl(2). The OPENBSD_MAX macro enforces a strict upper
+                bound of 80 columns. If the physical terminal is narrower, the
+                internal screen limit scales down automatically, ensuring safe
+                line wrapping without overflowing the rendering buffer.
+		NOTE: the renedring text not always works. If it fails use
+		Ctrl+L.
+
+        Input Dispatching:
+                Input characters are handled by an array of function pointers mapped
+		directly to the 128 ASCII characters, avoiding iterative checks during
+		raw input processing. It doesn't handle all UTF-8 encoding (e.g. wchar_t)
+		Asynchronous sequence decoding is managed via poll(2) with custom
+		timeouts to safely process ANSI escape codes without thread blocking.
+
+        Execution and IPC:
+                wterm dispatches completed command buffers to a child shell
+                process via fork(2) and execve(2). To maintain environmental
+                synchronization (e.g., preserving `cd` state), it uses a
+                side-channel IPC mechanism:
+                A unidirectional pipe is bound to file descriptor 3 of the child.
+                The child shell communicates state changes back to the parent by
+                appending `;set >&3` to the executed command. The parent parses 
+                these key-value pairs in chunks and stores them in an internal hash 
+                table (1024 buckets).
+                
+        Argument Limit Enforcement:
+                Before calling execve(2), the wrapper dynamically queries the
+                operating system's maximum argument length using sysconf(_SC_ARG_MAX)
+                to ensure safe execution and prevent buffer overflows. The limit it checks
+		is 1/4 of the current ARG_MAX to leave place for **envp.
