@@ -31,7 +31,5 @@ void                     burn_n_rebuild(struct cpkg *, enum rebuild, int);
 void                     neutral(char, struct cpkg *);
 void                     find_fill(char, struct cpkg *);
 void                     clear_screen(char, struct cpkg *);
-char                     *check_exec_safety(const char *, char *, const char *);
-void                     check_arg_max(void);
 
 #endif /* STERM_H */

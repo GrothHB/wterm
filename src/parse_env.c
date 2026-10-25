@@ -91,7 +91,7 @@ static char *
 parse(const char *env)
 {
 	char buf[MEMORY_CHUNK + 1], *name, *ifs, *backup;
-	struct shell_vars *env_var;
+	const struct shell_vars *env_var;
 	size_t bsize;
 	int c, i, k;
 	assert(env != NULL);
@@ -119,8 +119,8 @@ parse(const char *env)
 		}
 		buf[k] = '\0';
 		if (ifs != NULL && *ifs != '\n' && *ifs != '\0') {
-			size_t dist;
 			if (ifs[0] == '\'') {
+				size_t dist;
 				if ((dist = strlen(ifs)) > 2) {
 					dist -= 2;
 				/*
@@ -193,9 +193,8 @@ handle_exec(const char *shell, const char *command)
 	default:
 		close(fields[1]);
 		prv_env_var = NULL;
-		wsize = 0;
 
-		do {
+		while (1) {
 			if (prv_env_var != NULL) {
 				wsize = strlen(prv_env_var);
 				strlcpy(buffer, prv_env_var,
@@ -209,14 +208,13 @@ handle_exec(const char *shell, const char *command)
 			n = read(fields[0], &buffer[wsize],
 				  MEMORY_CHUNK - wsize);
 			if (n > 0) {
-				assert(wsize + n <=
-					MEMORY_CHUNK + 1);
+				assert(wsize + n <= MEMORY_CHUNK + 1);
 				buffer[wsize + n] = '\0';
 			} else {
 				break;
 			}
 			prv_env_var = parse(buffer);
-		} while (n > 0);
+		}
 		close(fields[0]);
 		if (prv_env_var != NULL)
 			free(prv_env_var);

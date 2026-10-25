@@ -4,7 +4,6 @@ fuzzer_bin
 ver
 afl_reg_tests
 afl_out_klaster
-afl_test
 corpus_min
 corpus_min2
 cov_bin
@@ -13,3 +12,7 @@ test_comp_afl
 term.dict
 wt
 out_env/
+compatb*
+config*
+oracle.awk
+corpus_env/

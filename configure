@@ -3,8 +3,8 @@
 # and reallocarray from OpenBSD
 
 rm -f config.h
-echo "#ifndef CONFIG_H" >config.h
-echo "#define CONFIG_H" >>config.h
+echo "#ifndef CONFIG_H" >src/config.h
+echo "#define CONFIG_H" >>src/config.h
 
 # checking if we have strlcpy:
 if echo '#include <stdlib.h>
@@ -17,7 +17,7 @@ if echo '#include <stdlib.h>
 		strlcpy(b, "a", 2);
 		return (0);
 	 }' | cc -x c - -o /dev/null 2>/dev/null; then
-	echo "#define HAVE_STRLCPY 1">>config.h
+	echo "#define HAVE_STRLCPY 1">>src/config.h
 fi
 
 if echo '#include <stdio.h>
@@ -28,6 +28,6 @@ if echo '#include <stdio.h>
 		void *p = reallocarray(NULL, 1, sizeof(void *));
 		return (0);
 	 }' | cc -x c - -o /dev/null 2>/dev/null; then
-	echo "#define HAVE_REALLOCARRAY 1" >>config.h
+	echo "#define HAVE_REALLOCARRAY 1" >>src/config.h
 fi
-echo "#endif /* CONFIG_H */">>config.h
+echo "#endif /* CONFIG_H */">>src/config.h

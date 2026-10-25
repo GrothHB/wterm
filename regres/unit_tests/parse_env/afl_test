@@ -1,0 +1,27 @@
+rm -rf corpus_env out_env
+mkdir -p corpus_env out_env
+
+printf "VAR='zwykla_wartosc'\n" > corpus_env/id_01_basic
+
+printf "EMPTY=''\n" > corpus_env/id_02_empty
+
+printf "MULTI='linia_1\n=\nlinia_2'\n" > corpus_env/id_03_multi
+
+printf "LONG='" > corpus_env/id_04_long
+head -c 4000 /dev/zero | tr '\0' 'A' >> corpus_env/id_04_long
+printf "'\n" >> corpus_env/id_04_long
+
+AFL_USE_ASAN=1 afl-clang-fast -O0 -g -Wall -Wextra -o fuzzer_bin main.c create_chaos.c
+
+if [ $? -ne 0 ]; then
+    echo "Kompilacja zakończona błędem. Przerywam."
+    exit 1
+fi
+
+for i in $(seq 1 9); do
+    afl-fuzz -i corpus_env -o out_env -S slave_$i -- ./fuzzer_bin > /dev/null 2>&1 &
+done
+
+afl-fuzz -i corpus_env -o out_env -M master -- ./fuzzer_bin
+
+killall afl-fuzz

@@ -4,7 +4,7 @@ mkdir -p afl_in afl_out_klaster
 rm -f afl_in/*.txt
 
 AFL_USE_ASAN=1 afl-clang-fast -O0 -g -Wall -Wextra -DHISTORY_MAX_SIZE=3 \
-    redef.c ../src/test.c ../src/test2.c ../src/test3.c ../src/sparse.c create_chaos.c -o fuzzer_bin || exit 1
+    redef.c ../src/tab_compl.c ../src/rvs_mode.c ../src/sparse.c create_chaos.c -o fuzzer_bin || exit 1
 
 > term.dict
 cat << 'EOF' >> term.dict
@@ -29,7 +29,6 @@ EOF
 
 ls /bin | grep -E '^[a-z]{2,6}$' | head -n 40 | awk '{ printf "cmd_%s=\"%s\"\n", $1, $1 }' >> term.dict
 
-echo "[*] Generowanie Złotych Ziaren..."
 awk 'BEGIN {
     for(i=1; i<=20; i++) printf "komenda_nr_%d\n", i;
     printf "\033[A\033[A\033[A\033[B\033[B\n";

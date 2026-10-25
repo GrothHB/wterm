@@ -243,8 +243,9 @@ clean:
 char **
 exec_paths(int *npaths)
 {
-	char 		**stable, **fsd, *path, *pol;
-	size_t 		npath, i, lidx, c_size, lpath;
+	size_t npath, i, lidx, c_size, lpath;
+	char **stable, **fsd, *path;
+	const char *pol;
 	assert(npaths != NULL);
 	size_t size = sizeof(char *);
 	lidx = npath = 0;

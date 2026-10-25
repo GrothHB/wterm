@@ -1,3 +1,0 @@
-ls -la
-/usr/bin
-/bin/bash

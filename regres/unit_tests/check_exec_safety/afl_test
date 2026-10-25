@@ -1,0 +1,23 @@
+mkdir exec_seeds afl_out
+
+printf "ls -la\n/usr/bin\n/bin/bash\n" > exec_seeds/01_normal.txt
+
+printf "awk '{print \$1}' file\n\n/bin/zsh\n" > exec_seeds/02_no_path.txt
+
+printf "echo test\n/tmp\n\n" > exec_seeds/03_no_shell.txt
+
+awk 'BEGIN {
+    for(i=0; i<4000; i++) printf "A"
+    printf "\n\n/bin/sh\n"
+}' > exec_seeds/04_huge_cmd.txt
+
+awk 'BEGIN {
+    for(i=0; i<3000; i++) printf "C"
+    printf "\n"
+    for(i=0; i<3000; i++) printf "D"
+    printf "\n/bin/bash\n"
+}' > exec_seeds/05_huge_both.txt
+
+AFL_USE_ASAN=1 afl-clang-fast -O0 -g test.c body.c -o afl_harness
+
+afl-fuzz -i exec_seeds/ -o afl_out/ -m none -- ./afl_harness

@@ -45,6 +45,8 @@
 		      OPENBSD_MAX && pk->screen_limit <= \
 		      OPENBSD_MAX - strlen(pk->ps) )
 
+static char              *check_exec_safety(const char *, const char *, const char *);
+static void              check_arg_max(void);
 static char              *parse_dir(char *);
 static void              assigne(char, struct cpkg *);
 static void              break_line(const struct cpkg *);
@@ -448,9 +450,10 @@ set_cursor(int position, const struct cpkg *pk)
 void
 clear_comm(char c, struct cpkg *pk)
 {
-	char buf[32], *shell, *command, *old_path;
+	const char *shell, *old_path; 
 	struct termios raw;
 	int slide, linep;
+	char *command;
 	size_t len;
 	(void)c;
 	pk->flag = SAVE;
@@ -462,6 +465,7 @@ clear_comm(char c, struct cpkg *pk)
 	assert(COMMAND_IDX_REACH(pk->curs));
 	slide = linep - (pk->curs / pk->screen_limit);
 	if (slide) {
+		char buf[32];
 		len = snprintf(buf, sizeof(buf), "\033[%dB\n\r", slide);
 		assert(sizeof(buf) >= len);
 		write(STDOUT_FILENO, buf, len);
@@ -595,7 +599,8 @@ find_fill(char c, struct cpkg *pk)
 	strlcpy(word, &pk->com.command[sword.sidx], sofw + 1);
 	wsize = strlen(word);
 	if (wsize > 0) {
-		char		*src, *new;
+		const char *src;
+		char *new;
 		src = new = word;
 		while (*src != '\0') {
 			if (*src == '\"') {
@@ -968,16 +973,15 @@ init_sig(void)
 	sigaction(SIGWINCH, &sa, NULL);
 }
 
-char *
-check_exec_safety(const char *shell, char *command, const char *old_path)
+static char *
+check_exec_safety(const char *shell, const char *command, const char *old_path)
 {
 	size_t bsize, len, csize, shell_size, ops;
 	size_t ssize, old_path_size, fcsize;
-	char path_comm[] = "export OLDPWD=";
-	char get_env_comm[] = ";set >&3";
+	const char path_comm[] = "export OLDPWD=";
+	const char get_env_comm[] = ";set >&3";
 	char *buf;
-	assert(command != NULL && strlen(command) >= 0 &&
-		strlen(command) <= MAX_CANON);
+	assert(command != NULL && strlen(command) <= MAX_CANON);
 	csize = strlen(command);
 	fcsize = csize + strlen(get_env_comm);
 
@@ -1011,7 +1015,7 @@ check_exec_safety(const char *shell, char *command, const char *old_path)
 	return (buf);
 }
 
-void
+static void
 check_arg_max(void)
 {
 	if ((arg_max = sysconf(_SC_ARG_MAX)) == -1)

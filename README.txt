@@ -108,7 +108,13 @@ TECHNICAL NOTES
                 The child shell communicates state changes back to the parent by
                 appending `;set >&3` to the executed command. The parent parses 
                 these key-value pairs in chunks and stores them in an internal hash 
-                table (1024 buckets).
+                table (1024 buckets) and refreshes them or adds new ones via setenv(3).
+		URGENT NOTE:
+			wterm is designed mostly to be compatible with small POSIX
+			shells (e.g. dash). It always parses shell variables that are
+			in the form of `key='value'` or `key=value`, but it doesn't
+			parse other types of variables like functions, which may lead
+			to variable corruption.
                 
         Argument Limit Enforcement:
                 Before calling execve(2), the wrapper dynamically queries the
