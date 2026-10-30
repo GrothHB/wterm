@@ -13,6 +13,7 @@
 #include "rvs_mode.h"
 
 #define OPENBSD_MAX 80 /* style(9) 80 column max */
+#define PRESSED_ENTER 0x1
 #define MAX_SIZE_FOR_PRINT (MAX_CANON + (MAX_CANON / OPENBSD_MAX) * \
 			    2 + 24)
 #define WORD_SEARCH 0xF
@@ -78,6 +79,7 @@ set_rvs_mode(char c, struct cpkg *pk)
 	} else {
 		pk->tptr[LF] = clear_comm;
 		pk->tptr['b'] = disp_stream;
+		pk->tptr[HT] = find_fill;
 		pk->ps[strlen(pk->ps) - 2] = '$';
 		old_curs = pk->com.idx;
 		paging(pk, PAG_CLEAR);
@@ -103,9 +105,10 @@ take_command(int indx, struct cpkg *pk)
 	i--;
 	if ((size_t)i >= pk->hst_num)
 		return;
-	wsize = strlen(pk->history[i]);
+	assert(pk->word_search!= NULL);
+	wsize = strlen(pk->word_search[i]);
 	assert(wsize <= MAX_CANON);
-	memcpy(pk->com.command, pk->history[i], wsize + 1);
+	memcpy(pk->com.command, pk->word_search[i], wsize + 1);
 	pk->curs = wsize;
 	set_cursor(pk->curs, pk);
 	pk->com.idx = pk->curs;
@@ -128,10 +131,6 @@ rvs_search_mode(char c, struct cpkg *pk)
 		paging(pk, PAG_HANDLING_SPACE);
 		return;
 	}
-	if (pk->word_search != NULL && pk->word_search != pk->history) {
-		free(pk->word_search);
-		pk->word_search = NULL;
-	}
 	if (pk->word_search == NULL) {
 		pk->word_search = pk->history;
 		pk->hst_num = pk->com.max_hst_num;
@@ -142,6 +141,11 @@ rvs_search_mode(char c, struct cpkg *pk)
 	}
 	switch (pk->com.command[i]) {
 	case 's':
+		if (pk->word_search != NULL &&
+		    pk->word_search != pk->history) {
+			free(pk->word_search);
+			pk->word_search = NULL;
+		}
 		if (pk->com.command[i + 1] == 's' &&
 		    pk->com.command[i + 2] == ' ') {
 			char **tmp;
@@ -168,6 +172,11 @@ rvs_search_mode(char c, struct cpkg *pk)
 		take_command(i + 2, pk);
 		return;
 	case 'l':
+		if (pk->word_search != NULL &&
+		    pk->word_search != pk->history) {
+			free(pk->word_search);
+			pk->word_search = NULL;
+		}
 		if (pk->com.command[i + 1] != ' ')
 			break;
 		i = strtol(&pk->com.command[i + 2], &endptr, 0);

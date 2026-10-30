@@ -58,8 +58,8 @@ static int
 afl_sigaction(int sig, const struct sigaction *act, struct sigaction *oact)
 {
 	(void)sig;
-	(void)*act;
-	(void)*oact;
+	(void)act;
+	(void)oact;
 	return (0);
 }
 
@@ -88,7 +88,11 @@ afl_poll(struct pollfd *fds, nfds_t fd, int timeout)
 {
 	if (timeout == -1)
 		timeout = 0;
+#ifdef __AFL_COMPILER
 	return (syscall(SYS_poll, fds, fd, timeout));
+#else
+	return (poll(fds, fd, timeout));
+#endif
 }
 
 #define tcgetattr afl_tcgetattr
@@ -98,6 +102,13 @@ afl_poll(struct pollfd *fds, nfds_t fd, int timeout)
 #define sigaction(sig, act, oact) afl_sigaction(sig, act, oact)
 #define poll afl_poll
 #define ioctl afl_ioctl
+
+#ifdef TESTING
+#define strlcpy mystrlcpy
+#define reallocarray myreallocarray
+
+#include "../src/compatb.c"
+#endif
 
 #define parse afl_parse
 #include "../src/parse_env.c"

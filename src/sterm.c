@@ -101,7 +101,7 @@ main(void)
 		if (ps_size > 21) {
 			header.ps = ps;
 		} else {
-			strlcpy(ps1, ptr, sizeof(ps1));
+			memcpy(ps1, ptr, ps_size);
 			header.ps = ps1;
 			header.ps[ps_size++] = '$';
 			header.ps[ps_size++] = ' ';
@@ -456,6 +456,11 @@ clear_comm(char c, struct cpkg *pk)
 	char *command;
 	size_t len;
 	(void)c;
+	if (pk->com.idx == 0) {
+		write(STDOUT_FILENO, "\r\n", 2);
+		burn_n_rebuild(pk, TERM_RB, 0);
+		return;
+	}
 	pk->flag = SAVE;
 	hcntl(pk);
 	pk->flag = CLEAR;
@@ -477,6 +482,7 @@ clear_comm(char c, struct cpkg *pk)
 	old_path = getenv("OLDPWD");
 	tcgetattr(STDIN_FILENO, &raw);
 	tcsetattr(STDIN_FILENO, TCSANOW, &pk->base);
+	pk->tptr[3] = neutral;
 	command = check_exec_safety(shell, pk->com.command, old_path);
 	if (command != NULL) {
 		if (handle_exec(shell, command) == 0 || term_sig) {
@@ -493,6 +499,7 @@ clear_comm(char c, struct cpkg *pk)
 		free(command);
 	}
 	tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+	pk->tptr[3] = check_break;
 }
 
 static void
@@ -618,6 +625,7 @@ find_fill(char c, struct cpkg *pk)
 	switch (sword.type) {
 	case INWORD:
 	case FEXEC:
+	case DOT:
 		if (getcwd(path, PATH_MAX) == NULL)
 			return;
 		if (wsize == 1 && word[0] == ' ')
@@ -718,7 +726,6 @@ find_fill(char c, struct cpkg *pk)
 			return;
 		break;
 	case PDIRECT:
-	case DOT:
 		return;
 	}
 	burn_n_rebuild(pk, HISTORY, 0);

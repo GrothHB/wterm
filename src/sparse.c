@@ -25,12 +25,12 @@ parse(struct cpkg *pk)
 		case LEX_NORMAL:
 			switch (c) {
 			case '>':
+			case '<':
 				lw.type = FEXEC;
 				wflag = 0;
 				break;
 			case '&':
 			case '|':
-			case '<':
 			case '(':
 			case ';':
 				wflag = 0;

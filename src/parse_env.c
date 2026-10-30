@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 #include "parse_env.h"
 
@@ -174,6 +175,7 @@ handle_exec(const char *shell, const char *command)
 		(char *)command,
 		NULL
 	};
+	signal(SIGINT, SIG_IGN);
 	status = pipe(fields);
 	if (status == -1) {
 		printf("Pipe has failed\n");
@@ -184,6 +186,7 @@ handle_exec(const char *shell, const char *command)
 		printf("The fork didn't work\n");
 		break;
 	case 0:
+		signal(SIGINT, SIG_DFL);
 		close(fields[0]);
 		dup2(fields[1], 3);
 		close(fields[1]);
@@ -227,12 +230,15 @@ handle_exec(const char *shell, const char *command)
 			if (ex == 127) {
 				close(fields[0]);
 				printf("wt: Something went wrong in fork\n");
+				signal(SIGINT, SIG_DFL);
 				return (1);
 			} 
 		}
 
-		if (n < 0)
+		if (n < 0){
+			signal(SIGINT, SIG_DFL);
 			return (1);
+		}
 		if ((tmp = lookup("PWD")) == NULL) {
 			close(fields[0]);
 			break;
@@ -245,5 +251,6 @@ handle_exec(const char *shell, const char *command)
 
 		break;
 	}
+	signal(SIGINT, SIG_DFL);
 	return (0);
 }

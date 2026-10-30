@@ -1,36 +1,38 @@
-CFLAGS = -Wall -Wextra -pedantic -g -DNDEBUG
-COMP = clang
-SRCS = ./src/sterm.c ./src/tab_compl.c ./src/sparse.c ./src/compatb.c ./src/rvs_mode.c ./src/parse_env.c
-OBJS = ${SRCS:.c=.o}
+CC = clang
+CFLAGS_BASE = -Wall -Wextra -pedantic -g
+SRCS = src/sterm.c src/tab_compl.c src/sparse.c src/compatb.c src/rvs_mode.c src/parse_env.c
+OBJS = $(SRCS:.c=.o)
+TARGET = wt
 
-CFLAG_OP = 
-.if !empty(.TARGETS:Mdebug)
-DEB = -O0
-.elif !empty(.TARGETS:Mopt)
-OPT = -O3
-.elif !empty(.TARGETS:Mstest)
-STEST = -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
-	-fstrict-aliasing
-.elif !empty(.TARGETS:Moptsize)
-OSIZE = -Os
-.endif
+# Domyślny cel, gdy wpiszesz samo "make"
+all: opt
 
-.SUFFIXES:
-.SUFFIXES: .c .o
+# Profile kompilacji (rekursywne wywołanie gwarantuje działanie w GNU Make i BSD Make)
+opt:
+	$(MAKE) $(TARGET) CFLAGS="$(CFLAGS_BASE) -O3 -DNDEBUG"
 
-.c:
-	$(COMP) $(CFLAGS) $(CFLAG_OP) $(DEB) $(OPT) $(STEST) $(OSIZE) -o $@ $<
-optsize: wt
+optsize:
+	$(MAKE) $(TARGET) CFLAGS="$(CFLAGS_BASE) -Os -DNDEBUG"
+
 debug:
-	@:
-opt: wt
-stest: wt
-wt: $(OBJS)
-	$(COMP) $(CFLAGS) $(OPT) $(DEB) $(CFLAG_OP) $(STEST) $(OSIZE) -o $@ $(OBJS)
+	$(MAKE) $(TARGET) CFLAGS="$(CFLAGS_BASE) -O0"
+
+stest:
+	$(MAKE) $(TARGET) \
+	CFLAGS="$(CFLAGS_BASE) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -fstrict-aliasing -ftrivial-auto-var-init=pattern"
+
+# Główne reguły budowania
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS)
+
 .c.o:
-	$(COMP) $(CFLAGS) $(OPT) $(DEB) $(CFLAG_OP) $(STEST) $(OSIZE) -c -o $@ $<
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 check:
-	cppcheck --enable=all --inconclusive --std=c89 --suppress=missingIncludeSystem --error-exitcode=1 \
-	--suppress=funcArgNamesDifferentUnnamed  --check-level=exhaustive -i src/vi_edit.c src/
+	cppcheck --enable=all --inconclusive --std=c89 --suppress=missingIncludeSystem \
+	--error-exitcode=1 --check-level=exhaustive -i src/vi_edit.c src/
+
 clean:
-	rm ./src/*.o
+	rm -f src/*.o $(TARGET)
+
+.PHONY: all opt optsize debug stest check clean
